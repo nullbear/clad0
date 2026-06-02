@@ -210,7 +210,41 @@ function sectionText(n,key){
   return '';
 }
 function addSection(title, text, cls=''){
-  return '<div class="e-section"><div class="e-head">'+title+'</div><p class="e-text '+cls+'">'+text+'</p></div>';
+  return '<section class="'+cls+'"><h3>'+title+'</h3><p>'+text+'</p></section>';
+}
+function renderAbilitiesMarkdown(text){
+  let raw = String(text || '').trim();
+  if (!raw) return '';
+
+  // Normalize line endings.
+  raw = raw.replace(/\r\n/g, '\n');
+
+  // If ability names are written one after another without blank lines,
+  // force a paragraph break before each bolded ability after the first.
+  raw = raw.replace(/([^\n])\s+(\*\*[^*\n]+?\*\*)/g, '$1\n\n$2');
+
+  return raw
+    .split(/\n\s*\n/g)
+    .map(block => {
+      let safe = escHtml(block.trim());
+
+      safe = safe.replace(/\*\*([^*]+?)\*\*/g, function(_, inner){
+        return '<strong>' + inner.trim() + '</strong>';
+      });
+
+      safe = safe.replace(/__([^_]+?)__/g, function(_, inner){
+        return '<strong>' + inner.trim() + '</strong>';
+      });
+
+      safe = safe.replace(/\n/g, '<br>');
+
+      return '<p>' + safe + '</p>';
+    })
+    .join('');
+}
+
+function addAbilitiesSection(title, text, cls='abilities-text'){
+  return '<section class="'+cls+'"><h3>'+title+'</h3>'+renderAbilitiesMarkdown(text)+'</section>';
 }
 function renderDetail(n){
   const rk=n.r||'';
@@ -283,7 +317,7 @@ function renderDetail(n){
     html+=addSection('4. Use in Review', sectionText(n,'ecology'));
     html+=addSection('5. Common Errors', sectionText(n,'behavior'));
     html+=addSection('6. Quality Criteria', sectionText(n,'traits'));
-    html+=addSection('7. Editorial Action', sectionText(n,'abilities'));
+    html += addAbilitiesSection('7. Abilities', sectionText(n,'abilities'));
     html+=addSection('8. Notes', sectionText(n,'background'));
   } else {
     html+=addSection('1. Summary Description', sectionText(n,'summary'));
@@ -292,7 +326,7 @@ function renderDetail(n){
     html+=addSection('4. Ecology', sectionText(n,'ecology'));
     html+=addSection('5. Behavior & Personality', sectionText(n,'behavior'));
     html+=addSection('6. Traits', sectionText(n,'traits'));
-    html+=addSection('7. Abilities', sectionText(n,'abilities'));
+    html+=addAbilitiesSection('7. Abilities', sectionText(n,'abilities'));
     html+=addSection('8. Background', sectionText(n,'background'));
   }
   if(n.conv) html+=addSection('Convergent Evolution', n.conv, '');
