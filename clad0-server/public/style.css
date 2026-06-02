@@ -1,0 +1,438 @@
+
+@import url('https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Cinzel:wght@400;600&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;background:#3a2e1c;font-family:'EB Garamond',Georgia,serif;-webkit-font-smoothing:antialiased}
+
+/* ── DESK / BACKGROUND ── */
+body{
+  background:
+    radial-gradient(ellipse 120% 80% at 30% 110%,rgba(90,60,20,.55),transparent 55%),
+    radial-gradient(ellipse 80% 60% at 80% -10%,rgba(60,40,15,.4),transparent 50%),
+    #2a2016;
+}
+
+/* ── BOOK WRAPPER ── */
+#book{
+  position:fixed;inset:0;
+  display:flex;align-items:stretch;
+  padding:18px 12px 14px 12px;
+  gap:0;
+}
+
+/* ── PAGE SHARED ── */
+.page{
+  position:relative;
+  background:
+    radial-gradient(ellipse 60% 40% at 15% 90%,rgba(160,110,50,.09),transparent 55%),
+    radial-gradient(ellipse 50% 60% at 85% 10%,rgba(140,100,40,.07),transparent 50%),
+    radial-gradient(ellipse 80% 30% at 50% 50%,rgba(180,150,80,.03),transparent 60%),
+    #f0e6c8;
+  overflow:hidden;
+  /* ruled lines */
+  background-image:
+    radial-gradient(ellipse 60% 40% at 15% 90%,rgba(160,110,50,.09),transparent 55%),
+    radial-gradient(ellipse 50% 60% at 85% 10%,rgba(140,100,40,.07),transparent 50%),
+    repeating-linear-gradient(transparent,transparent 27px,rgba(100,65,25,.1) 27px,rgba(100,65,25,.1) 28px);
+  background-color:#f0e6c8;
+  flex-shrink:0;
+}
+/* torn/deckled top edge */
+.page::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:6px;
+  background:linear-gradient(90deg,
+    #f0e6c8 0%,#eadfbf 8%,#f2e8cb 15%,#ecdfc1 22%,#f0e5c5 30%,
+    #eadec0 38%,#f1e7ca 46%,#ecdfbf 54%,#f0e6c8 62%,
+    #ebe0c2 70%,#f1e6c9 78%,#eee3c6 86%,#f0e6c8 100%);
+  z-index:2;
+}
+/* page shadow/depth */
+.page::after{content:'';position:absolute;inset:0;pointer-events:none;z-index:1;
+  box-shadow:inset 0 0 30px rgba(80,50,10,.06);}
+
+/* ── LEFT PAGE (tree) ── */
+#left-page{
+  width:340px;
+  border-radius:4px 0 0 4px;
+  box-shadow:-6px 0 20px rgba(0,0,0,.35),inset -8px 0 20px rgba(80,50,10,.12);
+  display:flex;flex-direction:column;
+}
+/* left margin red line */
+#left-page .margin-line{
+  position:absolute;left:44px;top:0;bottom:0;width:1px;
+  background:rgba(180,60,40,.22);z-index:3;pointer-events:none;
+}
+#left-page-header{
+  flex-shrink:0;padding:14px 14px 6px 48px;
+  border-bottom:1px solid rgba(100,65,25,.2);
+  position:relative;z-index:3;
+}
+#left-page-header .pg-title{
+  font-family:'IM Fell English',serif;font-style:italic;
+  font-size:12.5px;color:#5a3e1a;letter-spacing:.04em;
+}
+#left-page-header .pg-sub{
+  font-family:'IM Fell English',serif;font-style:italic;
+  font-size:10px;color:#8a7040;margin-top:1px;
+}
+#tree-controls{
+  flex-shrink:0;padding:5px 8px 5px 48px;
+  border-bottom:1px solid rgba(100,65,25,.15);
+  display:flex;align-items:center;gap:5px;flex-wrap:wrap;
+  position:relative;z-index:3;
+}
+#search-field{
+  flex:1 1 100px;min-width:60px;background:rgba(255,255,255,.4);
+  border:1px solid rgba(100,65,25,.3);border-radius:2px;
+  padding:3px 7px;font-family:'EB Garamond',serif;font-size:12px;
+  color:#2a1a08;outline:none;
+}
+#search-field:focus{border-color:rgba(130,80,30,.6);background:rgba(255,255,255,.6)}
+#search-field::placeholder{color:#a09060;font-style:italic}
+.fltog{
+  font-family:'IM Fell English',serif;font-style:italic;
+  font-size:10.5px;padding:2px 6px;border-radius:2px;
+  border:1px solid rgba(100,65,25,.3);background:transparent;
+  color:#7a5a28;cursor:pointer;white-space:nowrap;transition:all .12s;
+}
+.fltog:hover{color:#3a1f08;border-color:rgba(100,65,25,.6)}
+.fltog.on{background:rgba(100,65,25,.12);color:#2a1508;border-color:rgba(100,65,25,.5)}
+.smtog{font-size:10px;padding:2px 5px;font-style:normal;font-family:'EB Garamond',serif}
+#tree-scroll{flex:1;overflow-y:auto;overflow-x:hidden;padding:6px 0 20px;position:relative;z-index:2}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:rgba(0,0,0,.05)}
+::-webkit-scrollbar-thumb{background:rgba(100,65,25,.35);border-radius:2px}
+
+/* ── SPINE ── */
+#spine{
+  width:26px;flex-shrink:0;
+  background:linear-gradient(90deg,
+    #c8b088 0%,#b89a68 15%,#a88848 30%,
+    #9a7a3a 45%,#a88848 55%,
+    #b89a68 70%,#c8b088 85%,#d8c098 100%);
+  box-shadow:0 0 12px rgba(0,0,0,.4);
+  display:flex;align-items:center;justify-content:center;
+  position:relative;
+}
+#spine-text{
+  writing-mode:vertical-rl;
+  font-family:'Cinzel',serif;font-size:7.5px;font-weight:600;
+  letter-spacing:.18em;text-transform:uppercase;
+  color:#3a2808;opacity:.7;white-space:nowrap;
+  transform:rotate(180deg);
+}
+#spine::before,#spine::after{
+  content:'';position:absolute;left:0;right:0;height:8px;
+  background:linear-gradient(180deg,rgba(0,0,0,.25),transparent);
+}
+#spine::before{top:0}
+#spine::after{bottom:0;transform:rotate(180deg)}
+
+/* ── RIGHT PAGE (detail) ── */
+#right-page{
+  flex:1;min-width:0;
+  border-radius:0 4px 4px 0;
+  box-shadow:8px 0 22px rgba(0,0,0,.4),inset 8px 0 20px rgba(80,50,10,.1);
+  display:flex;flex-direction:column;
+  transition:transform .35s ease;
+  transform-origin:left center;
+}
+#right-page.flip{animation:pageflip .38s ease;}
+@keyframes pageflip{
+  0%{transform:perspective(1200px) rotateY(0)}
+  40%{transform:perspective(1200px) rotateY(-12deg)}
+  100%{transform:perspective(1200px) rotateY(0)}
+}
+#right-page-header{
+  flex-shrink:0;padding:12px 70px 8px 18px;
+  border-bottom:2px solid rgba(100,65,25,.25);
+  position:relative;z-index:3;
+}
+.entry-label{
+  font-family:'IM Fell English',serif;font-style:italic;
+  font-size:10px;color:#8a7040;letter-spacing:.06em;margin-bottom:3px;
+}
+.entry-title{
+  font-family:'IM Fell English',serif;font-style:italic;
+  font-size:22px;line-height:1.15;color:#1a0e04;
+}
+.entry-title.sp-name{font-style:italic}
+.entry-title.theo-name{color:#7a6a50}
+.entry-title.fossil-name{color:#7a6a50}
+.entry-rank-line{
+  display:flex;align-items:baseline;gap:8px;margin-top:3px;flex-wrap:wrap;
+}
+.rank-stamp{
+  font-family:'Cinzel',serif;font-size:8.5px;font-weight:600;
+  letter-spacing:.1em;text-transform:uppercase;
+  padding:2px 7px;border-radius:2px;border:1px solid;
+  display:inline-flex;align-items:center;gap:4px;flex-shrink:0;
+}
+.rank-stamp.kingdom{color:#fff;font-size:8px;border-color:transparent}
+.rank-stamp.fossil{color:#7a6a4a;border-color:#9a8a6a;border-style:dashed;font-style:italic}
+.rank-stamp.theorized{color:#8a7a5a;border-color:#aaa090;border-style:dotted}
+.rank-stamp.curse-tag{color:#7a2a5a;border-color:#9a4a7a;border-style:dashed}
+.kg-line{font-family:'IM Fell English',serif;font-style:italic;font-size:12px;color:#7a5a28}
+#right-scroll{flex:1;overflow-y:auto;padding:0}
+.entry-body{padding:12px 70px 30px 18px;position:relative;z-index:2}
+/* margin annotation */
+.entry-body::before{
+  content:'';position:absolute;left:54px;top:0;bottom:0;width:1px;
+  background:rgba(180,60,40,.18);pointer-events:none;
+}
+
+/* ── ENTRY SECTIONS ── */
+.e-section{margin-bottom:14px}
+.e-head{
+  font-family:'Cinzel',serif;font-size:8.5px;font-weight:600;
+  letter-spacing:.14em;text-transform:uppercase;
+  color:#5a3e1a;margin-bottom:5px;
+  display:flex;align-items:center;gap:8px;
+}
+.e-head::after{content:'';flex:1;height:1px;background:rgba(100,65,25,.25)}
+.e-text{
+  font-family:'EB Garamond',serif;font-size:15px;line-height:1.7;color:#1a1208;
+}
+.e-text.tax-text{
+  font-size:14.5px;color:#2a1a08;
+  background:rgba(180,140,60,.06);border-left:2px solid rgba(130,80,30,.35);
+  padding:6px 10px;border-radius:0 3px 3px 0;
+}
+.e-text.ap-text{
+  font-size:14.5px;color:#1a1208;font-style:italic;
+  border-left:2px solid rgba(80,120,60,.35);
+  padding:6px 10px;border-radius:0 3px 3px 0;
+  background:rgba(80,120,60,.04);
+}
+.e-note{
+  font-size:13.5px;line-height:1.65;color:#3a2a10;
+  background:rgba(160,110,40,.06);border:1px dashed rgba(130,80,30,.28);
+  padding:7px 10px;border-radius:3px;font-style:italic;
+}
+/* traits */
+.trait-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:3px}
+.trait-tag{
+  font-family:'IM Fell English',serif;font-style:italic;
+  font-size:12px;padding:2px 8px;
+  border-radius:2px;border:1px solid rgba(100,65,25,.3);
+  color:#5a3e1a;background:rgba(160,110,40,.07);
+}
+/* path breadcrumb */
+.e-path{
+  font-family:'IM Fell English',serif;font-size:12px;color:#9a7a40;
+  margin-bottom:10px;line-height:1.6;font-style:italic;
+}
+.e-path .pa{cursor:pointer;color:#7a5a28;text-decoration:underline}
+.e-path .pa:hover{color:#2a1508}
+/* badges */
+.badge-row{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px}
+.ebadge{
+  font-family:'IM Fell English',serif;font-size:11.5px;
+  padding:2px 8px;border-radius:2px;border:1px solid;
+  display:inline-flex;align-items:center;gap:4px;
+}
+.ebadge.gorge{color:#5a3808;border-color:rgba(130,80,30,.5);background:rgba(170,120,50,.1)}
+.ebadge.ctx{color:#7a6a48;border-color:rgba(130,110,60,.4);border-style:dashed}
+.ebadge.fossil{color:#8a7050;border-color:#9a8060;border-style:dashed}
+.ebadge.theo{color:#8a7a58;border-color:#aaa080;border-style:dotted}
+.ebadge.curse{color:#6a2a4a;border-color:#8a4a6a;background:rgba(160,60,100,.07)}
+.ebadge.conv{color:#2a5a3a;border-color:#4a7a5a;background:rgba(40,100,60,.06)}
+/* subordinate list */
+.sub-list{margin-top:5px}
+.sub-item{
+  display:flex;align-items:center;gap:8px;
+  padding:5px 8px;border-bottom:1px solid rgba(100,65,25,.1);
+  cursor:pointer;transition:background .1s;
+}
+.sub-item:hover{background:rgba(160,110,40,.06)}
+.sub-item:last-child{border-bottom:none}
+.sub-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.sub-name{font-family:'EB Garamond',serif;font-size:14px;color:#1a1208;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sub-name.sp{font-style:italic}
+.sub-name.ext{color:#8a7050}
+.sub-name.theo{color:#8a7a58;font-style:italic}
+.sub-rank{font-family:'IM Fell English',serif;font-style:italic;font-size:11px;color:#9a8058;flex-shrink:0}
+/* welcome / empty state */
+.welcome-page{padding:28px 18px;text-align:center}
+.welcome-page .wt{
+  font-family:'IM Fell English',serif;font-style:italic;
+  font-size:24px;color:#2a1808;margin-bottom:6px;
+}
+.welcome-page .ws{
+  font-family:'Cinzel',serif;font-size:8px;font-weight:600;
+  letter-spacing:.22em;text-transform:uppercase;color:#8a7040;
+  margin-bottom:18px;display:block;
+}
+.welcome-page .wbody{
+  font-family:'EB Garamond',serif;font-size:14.5px;line-height:1.72;
+  color:#3a2a10;max-width:420px;margin:0 auto;text-align:left;
+}
+.welcome-page .wbody p{margin-bottom:10px}
+.wstats{
+  display:flex;gap:32px;justify-content:center;
+  margin:20px 0;padding:14px 0;
+  border-top:1px solid rgba(100,65,25,.2);
+  border-bottom:1px solid rgba(100,65,25,.2);
+}
+.wstat-n{font-family:'IM Fell English',serif;font-size:28px;color:#1a1208}
+.wstat-l{font-family:'Cinzel',serif;font-size:8px;letter-spacing:.12em;text-transform:uppercase;color:#8a7040;display:block;margin-top:2px}
+.welcome-page .wfn{
+  font-family:'IM Fell English',serif;font-style:italic;
+  font-size:12.5px;color:#9a8060;margin-top:16px;
+  border-top:1px solid rgba(100,65,25,.18);padding-top:12px;
+}
+
+/* ── QUICKTABS: SEMICIRCULAR CODE TABS ── */
+#tab-col{position:absolute;right:0;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:3px;z-index:20;pointer-events:auto;align-items:flex-end}
+.thumbtab{position:relative;width:50px;height:24px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0 4px 0 8px;border-radius:16px 0 0 16px;border:1px solid rgba(70,45,15,.45);border-right:none;background:#ede3c4;box-shadow:inset 2px 0 5px rgba(255,255,255,.25),0 1px 2px rgba(0,0,0,.15);transition:width .12s,filter .12s,background .12s}
+.thumbtab:hover{width:58px;filter:brightness(1.04)}
+.thumbtab.active{width:62px;background:#d3b66a;border-color:rgba(50,30,10,.65)}
+.thumbtab::before{content:'';position:absolute;left:2px;top:50%;transform:translateY(-50%);width:8px;height:16px;border-radius:8px 0 0 8px;background:rgba(58,46,28,.24);box-shadow:inset 1px 0 2px rgba(0,0,0,.25)}
+.thumbtab-body,.thumbtab-hole{display:none}
+.thumbtab-label{position:relative;z-index:2;writing-mode:horizontal-tb;transform:none;font-family:'Cinzel',serif;font-size:7.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#1f1408;white-space:nowrap;text-align:center;line-height:1}
+.thumbtab.active .thumbtab-label{color:#080502}
+.id-chip{font-family:'Cinzel',serif;font-size:8px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#3a2808;background:rgba(170,120,50,.14);border:1px solid rgba(100,65,25,.32);padding:2px 7px;border-radius:10px;display:inline-flex;align-items:center;gap:3px}
+.rule-link{font-family:'Cinzel',serif;font-size:8px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#4a2a08;border:1px solid rgba(100,65,25,.35);background:rgba(170,120,50,.10);padding:6px 10px;border-radius:12px;cursor:pointer;display:inline-block;margin-top:8px}.rule-link:hover{background:rgba(170,120,50,.18)}
+
+/* ── TAXONOMIC RANK COLOR SYSTEM ── */
+.rank-domain{--rank-color:#4b1d62;--rank-bg:rgba(75,29,98,.16);--rank-border:rgba(75,29,98,.55)}
+.rank-kingdom{--rank-color:#7a2e12;--rank-bg:rgba(122,46,18,.15);--rank-border:rgba(122,46,18,.52)}
+.rank-phylum{--rank-color:#815a00;--rank-bg:rgba(129,90,0,.14);--rank-border:rgba(129,90,0,.50)}
+.rank-class{--rank-color:#486a18;--rank-bg:rgba(72,106,24,.14);--rank-border:rgba(72,106,24,.50)}
+.rank-order{--rank-color:#12604e;--rank-bg:rgba(18,96,78,.14);--rank-border:rgba(18,96,78,.50)}
+.rank-family{--rank-color:#145d82;--rank-bg:rgba(20,93,130,.14);--rank-border:rgba(20,93,130,.50)}
+.rank-genus{--rank-color:#2d4a96;--rank-bg:rgba(45,74,150,.14);--rank-border:rgba(45,74,150,.50)}
+.rank-species{--rank-color:#663b78;--rank-bg:rgba(102,59,120,.13);--rank-border:rgba(102,59,120,.48)}
+.tag-reference{--rank-color:#5b4630;--rank-bg:rgba(120,90,45,.16);--rank-border:rgba(120,90,45,.55)}
+.tag-catalogue{--rank-color:#3b3b3b;--rank-bg:rgba(80,80,80,.12);--rank-border:rgba(80,80,80,.45)}
+.trank.tag-reference,.trank.tag-catalogue{color:var(--rank-color);background:var(--rank-bg);border:1px dashed var(--rank-border);border-radius:7px;padding:1px 4px;min-width:34px;text-align:center;font-style:normal;text-transform:uppercase;letter-spacing:.08em}
+.tag-stamp{font-family:'Cinzel',serif;font-size:8.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:2px 7px;border-radius:10px;border:1px dashed var(--rank-border);color:var(--rank-color);background:var(--rank-bg);display:inline-flex;align-items:center;gap:4px}
+.trow:has(.trank.tag-reference) .tlbl{border-left-color:#7a663d}
+.trow:has(.trank.tag-catalogue) .tlbl{border-left-color:#555}
+.tname.ref{font-family:'IM Fell English',serif;font-style:italic;color:#5b4630}
+
+.trank.rank-domain,.trank.rank-kingdom,.trank.rank-phylum,.trank.rank-class,.trank.rank-order,.trank.rank-family,.trank.rank-genus,.trank.rank-species{
+  color:var(--rank-color);background:var(--rank-bg);border:1px solid var(--rank-border);border-radius:7px;padding:1px 4px;min-width:34px;text-align:center;font-style:normal;text-transform:uppercase;letter-spacing:.08em;
+}
+.rank-stamp.rank-domain,.rank-stamp.rank-kingdom,.rank-stamp.rank-phylum,.rank-stamp.rank-class,.rank-stamp.rank-order,.rank-stamp.rank-family,.rank-stamp.rank-genus,.rank-stamp.rank-species{
+  color:var(--rank-color);background:var(--rank-bg);border-color:var(--rank-border);box-shadow:inset 0 0 0 1px rgba(255,255,255,.15);
+}
+.trow .tlbl{border-left:3px solid transparent}
+.trow:has(.trank.rank-domain) .tlbl{border-left-color:#4b1d62}
+.trow:has(.trank.rank-kingdom) .tlbl{border-left-color:#7a2e12}
+.trow:has(.trank.rank-phylum) .tlbl{border-left-color:#815a00}
+.trow:has(.trank.rank-class) .tlbl{border-left-color:#486a18}
+.trow:has(.trank.rank-order) .tlbl{border-left-color:#12604e}
+.trow:has(.trank.rank-family) .tlbl{border-left-color:#145d82}
+.trow:has(.trank.rank-genus) .tlbl{border-left-color:#2d4a96}
+.trow:has(.trank.rank-species) .tlbl{border-left-color:#663b78}
+
+/* ── TREE NODES ── */
+.trow{
+  display:flex;align-items:center;min-height:22px;
+  cursor:pointer;padding:0 4px 0 0;
+}
+.trow:hover .tlbl{background:rgba(100,65,25,.07);border-radius:2px}
+.trow.sel .tlbl{background:rgba(140,85,30,.12);box-shadow:inset 2px 0 0 rgba(130,60,20,.5)}
+.trow.hl .tname{font-weight:600;color:#2a1208!important}
+.tind{flex:0 0 12px;align-self:stretch;border-left:1px solid rgba(100,65,25,.18)}
+.tcar{
+  width:13px;flex:0 0 13px;display:flex;align-items:center;justify-content:center;
+  color:rgba(100,65,25,.5);font-size:7px;transition:transform .12s;
+  font-family:serif;flex-shrink:0;
+}
+.tcar.open{transform:rotate(90deg)}
+.tcar.leaf{opacity:0;pointer-events:none}
+.tlbl{display:flex;align-items:center;gap:3px;padding:2px 3px 2px 1px;flex:1;min-width:0}
+.trank{
+  font-family:'IM Fell English',serif;font-style:italic;
+  font-size:7.5px;letter-spacing:.03em;
+  color:#9a7a45;flex-shrink:0;white-space:nowrap;
+}
+.tname{
+  font-family:'EB Garamond',serif;font-size:13px;color:#1a1208;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;
+}
+.tname.sp{font-style:italic}
+.tname.kg{font-weight:600;font-size:13.5px;font-family:'IM Fell English',serif;font-style:italic}
+.tname.ext{color:#8a7050}
+.tname.theo{color:#9a8a65;font-style:italic}
+.tname.ctx{color:#9a8a65}
+.tdots{display:flex;gap:2px;margin-left:3px;flex-shrink:0}
+.tdot{width:5px;height:5px;border-radius:50%;flex-shrink:0}
+.tchildren{display:none}
+.tchildren.open{display:block}
+/* Kingdom dividers */
+.kg-divider{
+  margin:4px 8px 1px 8px;padding-top:3px;
+  border-top:1px solid rgba(100,65,25,.2);
+  font-family:'Cinzel',serif;font-size:8px;font-weight:600;
+  letter-spacing:.14em;text-transform:uppercase;
+  color:#7a5a28;
+}
+
+/* ── PAGE NUMBERS ── */
+.pgnum{
+  position:absolute;bottom:10px;
+  font-family:'IM Fell English',serif;font-style:italic;
+  font-size:11px;color:#a09060;pointer-events:none;z-index:5;
+}
+#pgnum-left{left:14px}
+#pgnum-right{right:70px}
+
+/* ── STRONGER TAXONOMIC RANK VISUALS ── */
+.trank.rank-domain::before,.rank-stamp.rank-domain::before{content:'DOMAIN';}
+.trank.rank-kingdom::before,.rank-stamp.rank-kingdom::before{content:'KINGDOM';}
+.trank.rank-phylum::before,.rank-stamp.rank-phylum::before{content:'PHYLUM';}
+.trank.rank-class::before,.rank-stamp.rank-class::before{content:'CLASS';}
+.trank.rank-order::before,.rank-stamp.rank-order::before{content:'ORDER';}
+.trank.rank-family::before,.rank-stamp.rank-family::before{content:'FAMILY';}
+.trank.rank-genus::before,.rank-stamp.rank-genus::before{content:'GENUS';}
+.trank.rank-species::before,.rank-stamp.rank-species::before{content:'SPECIES';}
+.trank[class*="rank-"]{font-size:0!important;min-width:58px!important;border-radius:999px!important;font-family:'Cinzel',serif!important;}
+.trank[class*="rank-"]::before{font-size:6.5px!important;line-height:1;}
+.rank-stamp[class*="rank-"]{border-radius:999px!important;}
+.rank-stamp[class*="rank-"]{font-size:0!important;}
+.rank-stamp[class*="rank-"]::before{font-size:8px!important;}
+.trow .tlbl{border-left-width:5px!important;box-shadow:inset 0 0 0 1px rgba(80,50,10,.03);}
+.trow:has(.trank.rank-species.theorized), .trow .tname.theo{filter:saturate(.92);}
+
+
+
+/* ── TAXONOMIC TYPOGRAPHY PASS ──
+   Rank label badges remain visible; taxon names now carry rank-specific typography. */
+.tname.rank-domain{font-variant:small-caps;font-weight:900;letter-spacing:.055em;text-transform:none;font-style:normal;font-family:'Cinzel',serif;font-size:13px;}
+.tname.rank-kingdom{font-variant:small-caps;font-weight:700;letter-spacing:.045em;text-transform:none;font-style:normal;font-family:'Cinzel',serif;font-size:12.5px;}
+.tname.rank-phylum{font-variant:small-caps;font-weight:600;letter-spacing:.035em;text-transform:none;font-style:normal;font-family:'Cinzel',serif;font-size:12.3px;}
+.tname.rank-class{font-weight:700;text-transform:capitalize;font-style:normal;font-family:'EB Garamond',Georgia,serif;font-size:13.5px;}
+.tname.rank-order{font-weight:600;text-transform:capitalize;font-style:normal;font-family:'EB Garamond',Georgia,serif;font-size:13.2px;}
+.tname.rank-family{font-weight:400;text-transform:capitalize;font-style:normal;font-family:'EB Garamond',Georgia,serif;font-size:13px;}
+.tname.rank-genus{font-weight:400;text-transform:capitalize;font-style:italic;font-family:'EB Garamond',Georgia,serif;font-size:13px;}
+.tname.rank-species{font-weight:400;text-transform:none;font-style:italic;font-family:'EB Garamond',Georgia,serif;font-size:13px;}
+.tname.rank-species::first-letter{text-transform:lowercase;}
+.tname.theo{color:#9d8f73!important;opacity:.78;}
+.trank.inferred{opacity:.58;filter:saturate(.65);}
+.rank-stamp.inferred{opacity:.68;filter:saturate(.65);}
+.entry-title.theo-name{color:#8c8068!important;}
+.rank-stamp.theorized{border-style:dotted!important;background:rgba(150,135,95,.10)!important;}
+
+/* ── TAXOLOGICAL RANK / HIERARCHY MISMATCH FLAGS ── */
+.rank-mismatch-name{
+  text-decoration-line:underline;
+  text-decoration-color:#b00000;
+  text-decoration-thickness:2px;
+  text-underline-offset:3px;
+}
+.rank-mismatch-bang{
+  color:#b00000;
+  font-weight:900;
+  font-style:normal!important;
+  font-family:Georgia,serif;
+  margin-right:.25em;
+  text-decoration:none!important;
+}
+.trow.rank-mismatch .tlbl{
+  box-shadow:inset 3px 0 0 #b00000,inset 0 0 0 1px rgba(176,0,0,.12)!important;
+}
+.sub-name.rank-mismatch-name{font-weight:600;}
+.entry-title.rank-mismatch-name{text-decoration-thickness:3px;}
+

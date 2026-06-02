@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>A Field Journal of the Throat — Systematic Observations</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="book">
+  <!-- LEFT PAGE -->
+  <div class="page" id="left-page">
+    <div class="margin-line"></div>
+    <div id="left-page-header">
+      <div class="pg-title">Index of Observed Taxa</div>
+      <div class="pg-sub">Phylogenetic & Systematic Record</div>
+    </div>
+    <div id="tree-controls">
+      <input id="search-field" type="text" placeholder="Search taxa…" autocomplete="off" spellcheck="false">
+      <button class="fltog on" id="tg-gorge">Gorge</button>
+      <button class="fltog on" id="tg-ctx">Context</button>
+      <button class="fltog on smtog" id="tg-theo">?</button>
+      <button class="fltog on smtog" id="tg-curse">☠</button>
+      <button class="fltog smtog" id="btn-exp">⊞</button>
+      <button class="fltog smtog" id="btn-col">⊟</button>
+    </div>
+    <div id="tree-scroll"><div id="tree-inner"></div></div>
+    <div class="pgnum" id="pgnum-left">i.</div>
+  </div>
+  <!-- SPINE -->
+  <div id="spine"><div id="spine-text">The Throat — Systematic Field Notes</div></div>
+  <!-- RIGHT PAGE -->
+  <div class="page" id="right-page">
+    <div id="right-page-header">
+      <div class="entry-label" id="entry-label">Field Journal of the Gorge</div>
+      <div class="entry-title" id="entry-title" style="font-family:'Cinzel',serif;font-size:17px;font-style:normal;letter-spacing:.06em">A Systematic Account of Life in the Throat</div>
+      <div class="entry-rank-line" id="entry-rank-line"></div>
+    </div>
+    <div id="right-scroll">
+      <div class="entry-body" id="entry-body">
+        <div class="welcome-page" id="welcome-card">
+          <div class="wt">Select any taxon from the index</div>
+          <span class="ws">to read the field entry</span>
+          <div class="wbody">
+            <p>This journal records the phylogenetic observations made within the Gorge known as the Throat — a vertical descent of some seventeen zones through which all known life in this subterranean system has been documented, classified, and where possible, named.</p>
+            <p>Entries are organised according to the D&amp;D creature-type convention as adapted for the deep: Domains, Kingdoms, Phyla, Classes, Orders, Families, Genera, and Species. Common ancestors for which no specimen has been recovered are noted as theorised, and marked <em>? thus</em>. Extinct or fossil-grade taxa are marked <em>† thus</em>. Organisms not native to the Gorge but included for taxonomic context are noted accordingly.</p>
+            <p>Tap or click any entry in the index at left to read the full eight-section field entry. The index now begins collapsed; open only the branch you need, or use the reference pages for placement rules.</p><button class="rule-link" onclick="jumpTo('default-entry-rules')">How to Use This Catalogue</button>
+          </div>
+          <div class="wstats" id="wstats"></div>
+          <div class="wfn">These observations are the work of the Stonesong Heralds and their predecessors. Errors of classification are the author's own. — <em>J.H.W., Senior Naturalist</em></div>
+        </div>
+      </div>
+    </div>
+    <div class="pgnum" id="pgnum-right">ii.</div>
+    <!-- THUMBHOLE TABS -->
+    <div id="tab-col"></div>
+  </div>
+</div>
+<script src="/viewer.js"></script>
+</body>
+</html>
