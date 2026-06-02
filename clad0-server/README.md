@@ -31,14 +31,14 @@ clad0/
 
 ## REST API
 
-| Method   | Path                | Description                                      |
-|----------|---------------------|--------------------------------------------------|
-| `GET`    | `/`                 | Viewer shell HTML                                |
-| `GET`    | `/api/clado`        | Full CLADO tree as JSON                          |
-| `GET`    | `/api/node/:id`     | Single node by id                                |
-| `PUT`    | `/api/node/:id`     | Update prose/metadata fields of an existing node |
-| `POST`   | `/api/node`         | Append a new child node                          |
-| `DELETE` | `/api/node/:id`     | Remove a node and its entire subtree             |
+|Method|Path|Description|
+|-|-|-|
+|`GET`|`/`|Viewer shell HTML|
+|`GET`|`/api/clado`|Full CLADO tree as JSON|
+|`GET`|`/api/node/:id`|Single node by id|
+|`PUT`|`/api/node/:id`|Update prose/metadata fields of an existing node|
+|`POST`|`/api/node`|Append a new child node|
+|`DELETE`|`/api/node/:id`|Remove a node and its entire subtree|
 
 ### PUT — update a node
 
@@ -46,25 +46,25 @@ Send any subset of writable fields as a JSON body. The `id` and `c` (children)
 fields are ignored; structural changes go through POST/DELETE instead.
 
 ```bash
-curl -X PUT http://localhost:3000/api/node/el-lithic-order \
-  -H 'Content-Type: application/json' \
+curl -X PUT http://localhost:3000/api/node/el-lithic-order \\
+  -H 'Content-Type: application/json' \\
   -d '{"note":"Updated note text", "gorge": true}'
 ```
 
-Response: `{ "ok": true, "id": "el-lithic-order", "changed": ["note","gorge"] }`
+Response: `{ "ok": true, "id": "el-lithic-order", "changed": \["note","gorge"] }`
 
 ### POST — add a new child node
 
 ```bash
-curl -X POST http://localhost:3000/api/node \
-  -H 'Content-Type: application/json' \
+curl -X POST http://localhost:3000/api/node \\
+  -H 'Content-Type: application/json' \\
   -d '{
     "parentId": "el-earth-phylum",
     "node": {
       "id": "el-my-new-order",
       "n": "My New Order",
       "r": "Order",
-      "c": []
+      "c": \[]
     }
   }'
 ```
@@ -79,30 +79,27 @@ curl -X DELETE http://localhost:3000/api/node/el-my-new-order
 
 Key fields the viewer uses:
 
-| Key          | Meaning                                              |
-|--------------|------------------------------------------------------|
-| `id`         | Stable unique identifier (string, no spaces)         |
-| `n`          | Display name                                         |
-| `r`          | Taxonomic rank (Kingdom, Phylum, Class, …, Species)  |
-| `c`          | Children array                                       |
-| `g`          | Summary / first prose section                        |
-| `tax`        | Taxonomic definition                                 |
-| `ap`         | Physical appearance                                  |
-| `eco`        | Ecology / persistence                                |
-| `beh`        | Behaviour                                            |
-| `traitsText` | Stable traits                                        |
-| `abilities`  | Abilities                                            |
-| `bg`         | Background / field relevance                         |
-| `sn`         | Scientific name (italic in viewer)                   |
-| `t`          | Trait tags array (e.g. `["mineral","mega"]`)         |
-| `gorge`      | `true` → present in the active Gorge                 |
-| `ctx`        | `true` → context/non-Gorge entry                     |
-| `theorized`  | `true` → inferred, no specimen                       |
-| `fossil`     | `true` → extinct                                     |
-| `tag`        | `"Reference"` or `"Catalogue"` for non-taxon nodes  |
+|Key|Meaning|
+|-|-|
+|`id`|Stable unique identifier (string, no spaces)|
+|`n`|Display name|
+|`r`|Taxonomic rank (Kingdom, Phylum, Class, …, Species)|
+|`c`|Children array|
+|`g`|Summary / first prose section|
+|`tax`|Taxonomic definition|
+|`ap`|Physical appearance|
+|`eco`|Ecology / persistence|
+|`beh`|Behaviour|
+|`traitsText`|Stable traits|
+|`abilities`|Abilities|
+|`bg`|Background / field relevance|
+|`sn`|Scientific name (italic in viewer)|
+|`t`|Trait tags array (e.g. `\["mineral","mega"]`)|
+|`gorge`|`true` → present in the active Gorge|
+|`ctx`|`true` → context/non-Gorge entry|
+|`theorized`|`true` → inferred, no specimen|
+|`fossil`|`true` → extinct|
+|`tag`|`"Reference"` or `"Catalogue"` for non-taxon nodes|
 
-## Editing in-browser (next step)
 
-The viewer already renders all eight prose sections. The next milestone is to
-wire a click-to-edit overlay that POSTs the edited fields to `PUT /api/node/:id`
-and re-renders the affected entry without a full page reload.
+
