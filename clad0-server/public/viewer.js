@@ -163,21 +163,14 @@ function rerenderTree(){
 /* ── DETAIL RENDER ── */
 function selectNode(n){
   sel=n;
+
   document.querySelectorAll('.trow.sel').forEach(r=>r.classList.remove('sel'));
+
   const row=document.querySelector(`.trow[data-id="${n.id}"]`);
   if(row) row.classList.add('sel');
-  renderDetail(n);
-  let editBtn = document.getElementById('entry-edit-btn');
-if (!editBtn) {
-  editBtn = document.createElement('button');
-  editBtn.id = 'entry-edit-btn';
-  editBtn.type = 'button';
-  editBtn.textContent = 'Edit';
-  editBtn.onclick = openEditor;
 
-  const rankLine = document.getElementById('entry-rank-line');
-  rankLine.appendChild(editBtn);
-}
+  renderDetail(n);
+  ensureEntryActionButtons();
 }
 
 function entryNo(n){
@@ -554,6 +547,397 @@ async function saveEditor() {
 
   status.textContent = 'Saved.';
   setTimeout(closeEditor, 400);
+}
+
+/* ── STRUCTURAL TREE EDITING ── */
+
+function ensureEntryActionButtons() {
+  if (!sel) return;
+
+  const rankLine = document.getElementById('entry-rank-line');
+  if (!rankLine) return;
+
+  let tools = document.getElementById('entry-action-tools');
+
+  if (!tools) {
+    tools = document.createElement('span');
+    tools.id = 'entry-action-tools';
+    tools.className = 'entry-action-tools';
+
+    const editBtn = document.createElement('button');
+    editBtn.id = 'entry-edit-btn';
+    editBtn.type = 'button';
+    editBtn.textContent = 'Edit';
+    editBtn.onclick = openEditor;
+
+    const addBtn = document.createElement('button');
+    addBtn.id = 'entry-add-child-btn';
+    addBtn.type = 'button';
+    addBtn.textContent = 'Add Child';
+    addBtn.onclick = openAddChildDialog;
+
+    const moveBtn = document.createElement('button');
+    moveBtn.id = 'entry-move-btn';
+    moveBtn.type = 'button';
+    moveBtn.textContent = 'Move';
+    moveBtn.onclick = openMoveDialog;
+
+    const delBtn = document.createElement('button');
+    delBtn.id = 'entry-delete-btn';
+    delBtn.type = 'button';
+    delBtn.textContent = 'Delete';
+    delBtn.onclick = deleteSelectedNode;
+
+    tools.appendChild(editBtn);
+    tools.appendChild(addBtn);
+    tools.appendChild(moveBtn);
+    tools.appendChild(delBtn);
+  }
+
+  rankLine.appendChild(tools);
+
+  const isRoot = ROOT && sel && sel.id === ROOT.id;
+  const moveBtn = document.getElementById('entry-move-btn');
+  const delBtn = document.getElementById('entry-delete-btn');
+
+  if (moveBtn) moveBtn.disabled = isRoot;
+  if (delBtn) delBtn.disabled = isRoot;
+}
+
+function clientFindParent(root, targetId) {
+  if (!root) return null;
+
+  for (let i = 0; i < (root.c || []).length; i++) {
+    const child = root.c[i];
+
+    if (child.id === targetId) {
+      return {
+        parent: root,
+        index: i
+      };
+    }
+
+    const found = clientFindParent(child, targetId);
+    if (found) return found;
+  }
+
+  return null;
+}
+
+function clientIsDescendant(ancestor, possibleDescendantId) {
+  if (!ancestor) return false;
+
+  for (const child of (ancestor.c || [])) {
+    if (child.id === possibleDescendantId) return true;
+    if (clientIsDescendant(child, possibleDescendantId)) return true;
+  }
+
+  return false;
+}
+
+function collectNodes(root, out = []) {
+  if (!root) return out;
+
+  out.push(root);
+
+  for (const child of (root.c || [])) {
+    collectNodes(child, out);
+  }
+
+  return out;
+}
+
+function nodePathLabel(n) {
+  const path = (n._path || []).map(p => p.n).join(' › ');
+  return path ? `${path} › ${n.n}` : n.n;
+}
+
+async function reloadTreeAndSelect(idToSelect) {
+  const res = await fetch('/api/clado');
+
+  if (!res.ok) {
+    throw new Error('Failed to reload taxonomy after edit: ' + res.status);
+  }
+
+  const data = await res.json();
+
+  ROOT = data;
+  nodeMap = {};
+  kgColor = {};
+  indexTree(ROOT, null, []);
+
+  if (idToSelect && nodeMap[idToSelect]) {
+    nodeMap[idToSelect]._path.forEach(p => expanded.add(p.id));
+    expanded.add(idToSelect);
+  }
+
+  rerenderTree();
+  buildTabs();
+
+  if (idToSelect && nodeMap[idToSelect]) {
+    selectNode(nodeMap[idToSelect]);
+
+    setTimeout(() => {
+      const row = document.querySelector(`.trow[data-id="${idToSelect}"]`);
+      if (row) row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, 60);
+  } else {
+    selectNode(ROOT);
+  }
+}
+
+function openAddChildDialog() {
+  if (!sel) return;
+
+  const name = prompt('New child name:');
+
+  if (!name || !name.trim()) return;
+
+  const rank = prompt('Rank for new child:', nextLikelyRank(sel.r || '') || 'Entry');
+
+  if (rank === null) return;
+
+  const sciName = prompt('Scientific name, optional:', '');
+
+  if (sciName === null) return;
+
+  createChildNode({
+    parentId: sel.id,
+    node: {
+      n: name.trim(),
+      sn: sciName.trim(),
+      r: rank.trim() || 'Entry',
+      summary: '',
+      tax: '',
+      ap: '',
+      eco: '',
+      beh: '',
+      traitsText: '',
+      abilities: '',
+      bg: '',
+      note: '',
+      gorge: !!sel.gorge,
+      ctx: !!sel.ctx,
+      theorized: false,
+      fossil: false,
+      curse: false,
+      c: []
+    }
+  });
+}
+
+function nextLikelyRank(rank) {
+  const order = [
+    'Domain',
+    'Kingdom',
+    'Phylum',
+    'Class',
+    'Order',
+    'Family',
+    'Genus',
+    'Species',
+    'Subspecies'
+  ];
+
+  const idx = order.indexOf(rank);
+
+  if (idx === -1) return 'Entry';
+  return order[Math.min(idx + 1, order.length - 1)];
+}
+
+async function createChildNode(payload) {
+  try {
+    const res = await fetch('/api/node', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      alert(data.error || 'Failed to create child entry.');
+      return;
+    }
+
+    expanded.add(payload.parentId);
+    await reloadTreeAndSelect(data.id);
+  } catch (err) {
+    alert('Create failed: ' + err.message);
+  }
+}
+
+function openMoveDialog() {
+  if (!sel || !ROOT) return;
+
+  if (sel.id === ROOT.id) {
+    alert('Cannot move the root entry.');
+    return;
+  }
+
+  ensureMovePanel();
+
+  const panel = document.getElementById('move-panel');
+  const select = document.getElementById('move-parent-select');
+  const status = document.getElementById('move-status');
+
+  select.innerHTML = '';
+
+  const all = collectNodes(ROOT)
+    .filter(n => {
+      if (!n || !n.id) return false;
+      if (n.id === sel.id) return false;
+      if (clientIsDescendant(sel, n.id)) return false;
+      return true;
+    })
+    .sort((a, b) => nodePathLabel(a).localeCompare(nodePathLabel(b)));
+
+  for (const n of all) {
+    const opt = document.createElement('option');
+    opt.value = n.id;
+    opt.textContent = `${nodePathLabel(n)} [${n.id}]`;
+    select.appendChild(opt);
+  }
+
+  const currentParent = clientFindParent(ROOT, sel.id);
+
+  if (currentParent) {
+    select.value = currentParent.parent.id;
+  }
+
+  status.textContent = '';
+  panel.classList.add('open');
+}
+
+function ensureMovePanel() {
+  if (document.getElementById('move-panel')) return;
+
+  const panel = document.createElement('div');
+  panel.id = 'move-panel';
+
+  panel.innerHTML = `
+    <div class="edit-card move-card">
+      <div class="edit-head">
+        <strong>Move entry</strong>
+        <button id="move-close" type="button">×</button>
+      </div>
+
+      <label class="edit-row">
+        <span>New parent</span>
+        <select id="move-parent-select"></select>
+      </label>
+
+      <div class="edit-actions">
+        <button id="move-save" type="button">Move entry</button>
+        <button id="move-cancel" type="button">Cancel</button>
+        <span id="move-status"></span>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(panel);
+
+  document.getElementById('move-close').onclick = closeMovePanel;
+  document.getElementById('move-cancel').onclick = closeMovePanel;
+  document.getElementById('move-save').onclick = moveSelectedNode;
+}
+
+function closeMovePanel() {
+  const panel = document.getElementById('move-panel');
+  if (panel) panel.classList.remove('open');
+}
+
+async function moveSelectedNode() {
+  if (!sel) return;
+
+  const select = document.getElementById('move-parent-select');
+  const status = document.getElementById('move-status');
+  const newParentId = select.value;
+
+  if (!newParentId) {
+    status.textContent = 'Choose a parent.';
+    return;
+  }
+
+  if (newParentId === sel.id) {
+    status.textContent = 'Cannot move an entry under itself.';
+    return;
+  }
+
+  status.textContent = 'Moving…';
+
+  try {
+    const res = await fetch('/api/node/' + encodeURIComponent(sel.id) + '/move', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        newParentId
+      })
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      status.textContent = data.error || 'Move failed.';
+      return;
+    }
+
+    expanded.add(newParentId);
+    closeMovePanel();
+    await reloadTreeAndSelect(sel.id);
+  } catch (err) {
+    status.textContent = 'Move failed: ' + err.message;
+  }
+}
+
+async function deleteSelectedNode() {
+  if (!sel || !ROOT) return;
+
+  if (sel.id === ROOT.id) {
+    alert('Cannot delete the root entry.');
+    return;
+  }
+
+  const loc = clientFindParent(ROOT, sel.id);
+  const parentId = loc && loc.parent ? loc.parent.id : ROOT.id;
+  const childCount = countSubtree(sel) - 1;
+
+  const warning = childCount > 0
+    ? `Delete "${sel.n}" and its ${childCount} subordinate entr${childCount === 1 ? 'y' : 'ies'}?`
+    : `Delete "${sel.n}"?`;
+
+  if (!confirm(warning + '\n\nThis writes the deletion to disk.')) return;
+
+  try {
+    const res = await fetch('/api/node/' + encodeURIComponent(sel.id), {
+      method: 'DELETE'
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      alert(data.error || 'Delete failed.');
+      return;
+    }
+
+    await reloadTreeAndSelect(parentId);
+  } catch (err) {
+    alert('Delete failed: ' + err.message);
+  }
+}
+
+function countSubtree(n) {
+  let total = 1;
+
+  for (const child of (n.c || [])) {
+    total += countSubtree(child);
+  }
+
+  return total;
 }
 
 // ── BOOTSTRAP ──────────────────────────────────────────────────────────────

@@ -523,3 +523,159 @@ body{
   font-size: 13px;
 }
 
+/* ─────────────────────────────────────────────
+   Structural tree editing controls
+   Edit / Add Child / Move / Delete
+   ───────────────────────────────────────────── */
+
+.entry-action-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 10px;
+  vertical-align: middle;
+  flex-wrap: wrap;
+}
+
+.entry-action-tools button,
+#entry-edit-btn,
+#entry-add-child-btn,
+#entry-move-btn,
+#entry-delete-btn {
+  appearance: none;
+  border: 1px solid rgba(80, 50, 20, 0.32);
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: rgba(255, 248, 220, 0.82);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.25;
+  cursor: pointer;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.35) inset;
+}
+
+.entry-action-tools button:hover,
+#entry-edit-btn:hover,
+#entry-add-child-btn:hover,
+#entry-move-btn:hover,
+#entry-delete-btn:hover {
+  background: rgba(255, 241, 190, 0.95);
+  border-color: rgba(80, 50, 20, 0.48);
+}
+
+.entry-action-tools button:active,
+#entry-edit-btn:active,
+#entry-add-child-btn:active,
+#entry-move-btn:active,
+#entry-delete-btn:active {
+  transform: translateY(1px);
+}
+
+.entry-action-tools button:disabled,
+#entry-edit-btn:disabled,
+#entry-add-child-btn:disabled,
+#entry-move-btn:disabled,
+#entry-delete-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+#entry-delete-btn {
+  border-color: rgba(130, 35, 25, 0.38);
+  background: rgba(255, 225, 215, 0.82);
+}
+
+#entry-delete-btn:hover {
+  border-color: rgba(130, 35, 25, 0.58);
+  background: rgba(255, 211, 198, 0.96);
+}
+
+/* ─────────────────────────────────────────────
+   Move / reparent modal
+   Reuses the edit-card visual language
+   ───────────────────────────────────────────── */
+
+#move-panel {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 12, 4, 0.45);
+  z-index: 10000;
+}
+
+#move-panel.open {
+  display: flex;
+}
+
+.move-card {
+  width: min(760px, calc(100vw - 32px));
+}
+
+#move-parent-select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid rgba(80, 50, 20, 0.3);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.55);
+  color: inherit;
+  font: inherit;
+}
+
+#move-parent-select:focus {
+  outline: 2px solid rgba(120, 80, 30, 0.28);
+  outline-offset: 2px;
+}
+
+#move-save,
+#move-cancel {
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(80, 50, 20, 0.35);
+  background: rgba(255, 248, 220, 0.85);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+#move-save:hover,
+#move-cancel:hover {
+  background: rgba(255, 241, 190, 0.95);
+}
+
+#move-status {
+  margin-left: auto;
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+/* ─────────────────────────────────────────────
+   Small screens
+   ───────────────────────────────────────────── */
+
+@media (max-width: 720px) {
+  .entry-action-tools {
+    display: flex;
+    margin-left: 0;
+    margin-top: 8px;
+  }
+
+  .entry-action-tools button,
+  #entry-edit-btn,
+  #entry-add-child-btn,
+  #entry-move-btn,
+  #entry-delete-btn {
+    font-size: 12px;
+    padding: 5px 9px;
+  }
+
+  .move-card {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+  }
+}
+
