@@ -167,6 +167,17 @@ function selectNode(n){
   const row=document.querySelector(`.trow[data-id="${n.id}"]`);
   if(row) row.classList.add('sel');
   renderDetail(n);
+  let editBtn = document.getElementById('entry-edit-btn');
+if (!editBtn) {
+  editBtn = document.createElement('button');
+  editBtn.id = 'entry-edit-btn';
+  editBtn.type = 'button';
+  editBtn.textContent = 'Edit';
+  editBtn.onclick = openEditor;
+
+  const rankLine = document.getElementById('entry-rank-line');
+  rankLine.appendChild(editBtn);
+}
 }
 
 function entryNo(n){
@@ -390,6 +401,8 @@ document.getElementById('search-field').addEventListener('input',e=>{
   },200);
 });
 
+
+
 /* ── INIT ── */
 function init(data){
   ROOT=data;indexTree(ROOT,null,[]);
@@ -405,6 +418,144 @@ function init(data){
     `<div><div class="wstat-n">${gorge}</div><span class="wstat-l">Gorge-Present</span></div>`+
     `<div><div class="wstat-n">${refs}</div><span class="wstat-l">Reference Pages</span></div>`;
 }
+
+const EDIT_FIELDS = [
+  ['n', 'Name', 'text'],
+  ['sn', 'Scientific name', 'text'],
+  ['r', 'Rank', 'text'],
+  ['summary', 'Summary', 'textarea'],
+  ['tax', 'Taxonomic definition', 'textarea'],
+  ['ap', 'Physical appearance', 'textarea'],
+  ['eco', 'Ecology', 'textarea'],
+  ['beh', 'Behavior', 'textarea'],
+  ['traitsText', 'Traits', 'textarea'],
+  ['abilities', 'Abilities', 'textarea'],
+  ['bg', 'Background', 'textarea'],
+  ['note', 'Classification notes', 'textarea'],
+  ['gorge', 'Present in Gorge', 'checkbox'],
+  ['ctx', 'Context entry', 'checkbox'],
+  ['theorized', 'Theorized', 'checkbox'],
+  ['fossil', 'Fossil / extinct', 'checkbox'],
+  ['curse', 'Curse vector', 'checkbox']
+];
+
+function ensureEditorUI() {
+  if (document.getElementById('edit-panel')) return;
+
+  const panel = document.createElement('div');
+  panel.id = 'edit-panel';
+  panel.innerHTML = `
+    <div class="edit-card">
+      <div class="edit-head">
+        <strong>Edit entry</strong>
+        <button id="edit-close" type="button">×</button>
+      </div>
+      <form id="edit-form"></form>
+      <div class="edit-actions">
+        <button id="edit-save" type="button">Save to disk</button>
+        <button id="edit-cancel" type="button">Cancel</button>
+        <span id="edit-status"></span>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(panel);
+
+  document.getElementById('edit-close').onclick = closeEditor;
+  document.getElementById('edit-cancel').onclick = closeEditor;
+  document.getElementById('edit-save').onclick = saveEditor;
+}
+
+function openEditor() {
+  if (!sel) return;
+  ensureEditorUI();
+
+  const form = document.getElementById('edit-form');
+  form.innerHTML = '';
+
+  for (const [key, label, type] of EDIT_FIELDS) {
+    const row = document.createElement('label');
+    row.className = 'edit-row';
+
+    const title = document.createElement('span');
+    title.textContent = label;
+    row.appendChild(title);
+
+    let input;
+    if (type === 'textarea') {
+      input = document.createElement('textarea');
+      input.rows = 4;
+      input.value = sel[key] || '';
+    } else if (type === 'checkbox') {
+      input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = !!sel[key];
+    } else {
+      input = document.createElement('input');
+      input.type = 'text';
+      input.value = sel[key] || '';
+    }
+
+    input.name = key;
+    row.appendChild(input);
+    form.appendChild(row);
+  }
+
+  document.getElementById('edit-status').textContent = '';
+  document.getElementById('edit-panel').classList.add('open');
+}
+
+function closeEditor() {
+  const panel = document.getElementById('edit-panel');
+  if (panel) panel.classList.remove('open');
+}
+
+async function saveEditor() {
+  if (!sel) return;
+
+  const status = document.getElementById('edit-status');
+  const form = document.getElementById('edit-form');
+  const payload = {};
+
+  for (const [key, , type] of EDIT_FIELDS) {
+    const input = form.elements[key];
+    if (!input) continue;
+
+    if (type === 'checkbox') {
+      payload[key] = input.checked;
+    } else {
+      payload[key] = input.value.trim();
+    }
+  }
+
+  status.textContent = 'Saving…';
+
+  const res = await fetch('/api/node/' + encodeURIComponent(sel.id), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    status.textContent = data.error || 'Save failed';
+    return;
+  }
+
+  Object.assign(sel, payload);
+
+  // Re-index because name/rank/status fields may affect search, labels, colors, etc.
+  nodeMap = {};
+  kgColor = {};
+  indexTree(ROOT, null, []);
+
+  rerenderTree();
+  selectNode(nodeMap[sel.id]);
+
+  status.textContent = 'Saved.';
+  setTimeout(closeEditor, 400);
+}
+
 // ── BOOTSTRAP ──────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   fetch('/api/clado')

@@ -436,3 +436,90 @@ body{
 .sub-name.rank-mismatch-name{font-weight:600;}
 .entry-title.rank-mismatch-name{text-decoration-thickness:3px;}
 
+#entry-edit-btn {
+  margin-left: 10px;
+  padding: 4px 10px;
+  border: 1px solid rgba(80, 50, 20, 0.35);
+  border-radius: 999px;
+  background: rgba(255, 248, 220, 0.8);
+  cursor: pointer;
+}
+
+#edit-panel {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 12, 4, 0.45);
+  z-index: 9999;
+}
+
+#edit-panel.open {
+  display: flex;
+}
+
+.edit-card {
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 18px;
+  border-radius: 14px;
+  background: #f5ead0;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+}
+
+.edit-head,
+.edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+#edit-close {
+  font-size: 22px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.edit-row {
+  display: grid;
+  gap: 4px;
+  margin: 10px 0;
+}
+
+.edit-row span {
+  font-weight: 700;
+}
+
+.edit-row input[type="text"],
+.edit-row textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid rgba(80, 50, 20, 0.3);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.55);
+  font: inherit;
+}
+
+.edit-row textarea {
+  resize: vertical;
+}
+
+#edit-save,
+#edit-cancel {
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(80, 50, 20, 0.35);
+  cursor: pointer;
+}
+
+#edit-status {
+  margin-left: auto;
+  font-size: 13px;
+}
+
