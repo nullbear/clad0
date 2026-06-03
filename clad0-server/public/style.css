@@ -805,19 +805,41 @@ body{
 
 /* ── deific ranks (gods are not genera; pantheons are not phyla) ─────────── */
 .trank.rank-pantheon::before,.rank-stamp.rank-pantheon::before{content:'PANTHEON';}
+.trank.rank-major-deity::before,.rank-stamp.rank-major-deity::before{content:'MAJOR DEITY';}
 .trank.rank-deity::before,.rank-stamp.rank-deity::before{content:'DEITY';}
+.trank.rank-minor-deity::before,.rank-stamp.rank-minor-deity::before{content:'MINOR DEITY';}
 .trank.rank-demigod::before,.rank-stamp.rank-demigod::before{content:'DEMIGOD';}
+.trank.rank-archdevil::before,.rank-stamp.rank-archdevil::before{content:'ARCHDEVIL';}
+.trank.rank-archdemon::before,.rank-stamp.rank-archdemon::before{content:'ARCHDEMON';}
+.trank.rank-archangel::before,.rank-stamp.rank-archangel::before{content:'ARCHANGEL';}
+.trank.rank-archfey::before,.rank-stamp.rank-archfey::before{content:'ARCHFEY';}
 .trank.rank-avatar::before,.rank-stamp.rank-avatar::before{content:'AVATAR';}
 .trank.rank-divine-servitor::before,.rank-stamp.rank-divine-servitor::before{content:'SERVITOR';}
 .trow:has(.trank.rank-pantheon) .tlbl{border-left-color:#b8860b}
+.trow:has(.trank.rank-major-deity) .tlbl{border-left-color:#d4af1d}
 .trow:has(.trank.rank-deity) .tlbl{border-left-color:#caa406}
-.trow:has(.trank.rank-demigod) .tlbl{border-left-color:#9a7b1a}
+.trow:has(.trank.rank-minor-deity) .tlbl{border-left-color:#9a7b1a}
+.trow:has(.trank.rank-demigod) .tlbl{border-left-color:#8a6a2a}
+.trow:has(.trank.rank-archdevil) .tlbl{border-left-color:#7a1c1c}
+.trow:has(.trank.rank-archdemon) .tlbl{border-left-color:#5a1030}
+.trow:has(.trank.rank-archangel) .tlbl{border-left-color:#3a5e8a}
+.trow:has(.trank.rank-archfey) .tlbl{border-left-color:#4e2e6e}
 .trow:has(.trank.rank-avatar) .tlbl{border-left-color:#7a6a2a}
 .trow:has(.trank.rank-divine-servitor) .tlbl{border-left-color:#8a8a5a}
-.rank-stamp.rank-pantheon,.rank-stamp.rank-deity,.rank-stamp.rank-demigod,
+.rank-stamp.rank-pantheon,.rank-stamp.rank-major-deity,.rank-stamp.rank-deity,
+.rank-stamp.rank-minor-deity,.rank-stamp.rank-demigod,
 .rank-stamp.rank-avatar,.rank-stamp.rank-divine-servitor{ background:#7a5c0a; color:#fbf3d0; }
-.trank.rank-pantheon,.trank.rank-deity,.trank.rank-demigod,
+.rank-stamp.rank-archdevil{ background:#7a1c1c; color:#f4dada; }
+.rank-stamp.rank-archdemon{ background:#5a1030; color:#f0d4e0; }
+.rank-stamp.rank-archangel{ background:#3a5e8a; color:#e0ecf6; }
+.rank-stamp.rank-archfey{ background:#4e2e6e; color:#ece0f6; }
+.trank.rank-pantheon,.trank.rank-major-deity,.trank.rank-deity,
+.trank.rank-minor-deity,.trank.rank-demigod,
 .trank.rank-avatar,.trank.rank-divine-servitor{ color:#8a6a0a; }
+.trank.rank-archdevil{ color:#7a1c1c; }
+.trank.rank-archdemon{ color:#7a1840; }
+.trank.rank-archangel{ color:#345582; }
+.trank.rank-archfey{ color:#4e2e6e; }
 
 /* ── banner image (any entry): full-width header, ≤1600×900 ─────────────── */
 .e-banner{ margin:0 0 16px; }
@@ -908,3 +930,18 @@ body{
 .stat-spell-body{ border-left:2px solid #e0cda0; padding-left:10px; margin-top:4px; }
 .stat-spell-items{ display:flex; flex-direction:column; gap:4px; }
 .stat-spell-slot{ display:grid; grid-template-columns:1fr 1.6fr auto; gap:6px; align-items:center; }
+
+/* ── EasyMDE markdown editor (loaded from /vendor) blended to the journal ── */
+.edit-row .EasyMDEContainer{ width:100%; }
+.EasyMDEContainer .CodeMirror{
+  background:#fbf7ee; border:1px solid #cbb88c; color:#2a1c0c;
+  font-family:'EB Garamond',Georgia,serif; font-size:13px; min-height:90px;
+}
+.EasyMDEContainer .editor-toolbar{
+  background:#f1e7d2; border:1px solid #cbb88c; border-bottom:0; opacity:1;
+}
+.EasyMDEContainer .editor-toolbar button{ color:#5a4a20 !important; }
+.EasyMDEContainer .editor-toolbar button.active,
+.EasyMDEContainer .editor-toolbar button:hover{ background:#e3d4b0; border-color:#cbb88c; }
+.EasyMDEContainer .editor-preview{ background:#fbf7ee; font-family:'EB Garamond',Georgia,serif; }
+.EasyMDEContainer .cm-s-easymde .cm-strong{ color:#5a4a14; }

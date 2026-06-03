@@ -96,7 +96,8 @@ function parseFlags(n){
 
 const RANK_ORDER=['Domain','Kingdom','Phylum','Class','Order','Family','Genus','Species','Subspecies'];
 // Deific section ranks — gods are not "genera" and pantheons are not "phyla".
-const DEIFIC_RANKS=['Pantheon','Deity','Demigod','Avatar','Divine Servitor'];
+const DEIFIC_RANKS=['Pantheon','Major Deity','Deity','Minor Deity','Demigod',
+  'Archdevil','Archdemon','Archangel','Archfey','Avatar','Divine Servitor'];
 const ALL_RANKS=[...RANK_ORDER, ...DEIFIC_RANKS];
 function rankIndex(r){const i=ALL_RANKS.indexOf(r);return i===-1?ALL_RANKS.length:i;}
 function isDeific(r){ return DEIFIC_RANKS.indexOf(r)!==-1; }
@@ -135,7 +136,10 @@ function displayClass(n){
 function displayLabel(n){
   if(n.tag){const t=String(n.tag);return t==='Reference'?'ref':t==='Catalogue'?'cat':t.substring(0,5).toLowerCase();}
   const rk=n.r||'';
-  if(rk==='Pantheon') return 'panth'; if(rk==='Deity') return 'deity'; if(rk==='Demigod') return 'demi';
+  if(rk==='Pantheon') return 'panth'; if(rk==='Major Deity') return 'mjr.d'; if(rk==='Deity') return 'deity';
+  if(rk==='Minor Deity') return 'mnr.d'; if(rk==='Demigod') return 'demi';
+  if(rk==='Archdevil') return 'a.dvl'; if(rk==='Archdemon') return 'a.dmn';
+  if(rk==='Archangel') return 'a.ang'; if(rk==='Archfey') return 'a.fey';
   if(rk==='Avatar') return 'avtr'; if(rk==='Divine Servitor') return 'serv';
   return rk==='Domain'?'dom':rk==='Kingdom'?'kgdm':rk==='Phylum'?'phyl':rk==='Class'?'class':rk==='Order'?'ordr':
     rk==='Family'?'fam':rk==='Genus'?'gen':rk==='Species'?'sp':rk.substring(0,5).toLowerCase();
@@ -504,9 +508,28 @@ function sectionText(n,key){
   return '';
 }
 function addSection(title, text, cls=''){
-  return '<section class="'+cls+'"><h3>'+title+'</h3><p>'+text+'</p></section>';
+  return '<section class="'+cls+'"><h3>'+title+'</h3>'+renderAbilitiesMarkdown(text)+'</section>';
 }
+// Configure marked once, if the library has been fetched into /vendor.
+if (typeof window !== 'undefined' && window.marked && window.marked.setOptions) {
+  window.marked.setOptions({ breaks: true, gfm: true });
+}
+// Markdown → HTML. Uses the `marked` library when present (sanitised with
+// DOMPurify if that is also loaded); otherwise falls back to the built-in
+// mini-renderer below, so the app works with or without the vendor libs.
 function renderAbilitiesMarkdown(text){
+  const src = String(text == null ? '' : text);
+  if (!src.trim()) return '';
+  if (window.marked) {
+    try {
+      const parse = window.marked.parse || window.marked;
+      const html = parse(src);
+      return window.DOMPurify ? window.DOMPurify.sanitize(html) : html;
+    } catch (_) { /* fall through to the built-in renderer */ }
+  }
+  return basicMarkdown(src);
+}
+function basicMarkdown(text){
   let raw = String(text || '').trim();
   if (!raw) return '';
 
@@ -1133,16 +1156,18 @@ async function openEditor() {
   ensureEditorUI();
 
   const form = document.getElementById('edit-form');
+  teardownProseEditors();
   form.innerHTML = '';
   for (const [key, label, type] of EDIT_FIELDS) {
     const row = document.createElement('label'); row.className = 'edit-row';
     const title = document.createElement('span'); title.textContent = label; row.appendChild(title);
     let input;
-    if (type === 'textarea') { input = document.createElement('textarea'); input.rows = 4; input.value = sel[key] || ''; }
+    if (type === 'textarea') { input = document.createElement('textarea'); input.rows = 4; input.value = sel[key] || ''; input.dataset.md = '1'; }
     else if (type === 'checkbox') { input = document.createElement('input'); input.type = 'checkbox'; input.checked = !!sel[key]; }
     else { input = document.createElement('input'); input.type = 'text'; input.value = sel[key] || ''; }
     input.name = key; row.appendChild(input); form.appendChild(row);
   }
+  enhanceProseEditors(form);
 
   const extra=document.getElementById('edit-extra');
   extra.innerHTML='';
@@ -1183,7 +1208,33 @@ async function openEditor() {
   document.getElementById('edit-panel').classList.add('open');
 }
 
+let _mdeInstances = [];
+// Wrap the long-form prose textareas in EasyMDE if the library is present.
+// Degrades silently to plain textareas when it isn't (or if init throws).
+function enhanceProseEditors(form){
+  if (!window.EasyMDE) return;
+  form.querySelectorAll('textarea[data-md]').forEach(function(ta){
+    if (ta._mde) return;
+    try {
+      ta._mde = new EasyMDE({
+        element: ta,
+        spellChecker: false,
+        status: false,
+        minHeight: '90px',
+        toolbar: ['bold','italic','heading-smaller','|','unordered-list','ordered-list','|','link','preview','guide'],
+        previewRender: function(plain){ return renderAbilitiesMarkdown(plain); }
+      });
+      _mdeInstances.push(ta._mde);
+    } catch (_) { /* leave the plain textarea in place */ }
+  });
+}
+function teardownProseEditors(){
+  _mdeInstances.forEach(function(mde){ try { mde.toTextArea(); } catch (_) {} });
+  _mdeInstances = [];
+}
+
 function closeEditor() {
+  teardownProseEditors();
   const panel = document.getElementById('edit-panel');
   if (panel) panel.classList.remove('open');
 }
@@ -1201,6 +1252,8 @@ async function saveEditor() {
 
     if (type === 'checkbox') {
       payload[key] = input.checked;
+    } else if (input._mde) {
+      payload[key] = input._mde.value().trim();
     } else {
       payload[key] = input.value.trim();
     }
