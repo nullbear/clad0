@@ -44,6 +44,10 @@ const TABS=[
 let ROOT=null,sel=null,nodeMap={},kgColor={};
 let sG=true,sC=true,sT=true,sCu=true,searchQ="";
 let expanded=new Set(),pgLeft=1,pgRight=2;
+let dragId=null;
+
+const RANK_ORDER=['Domain','Kingdom','Phylum','Class','Order','Family','Genus','Species','Subspecies'];
+function rankIndex(r){const i=RANK_ORDER.indexOf(r);return i===-1?RANK_ORDER.length:i;}
 
 function indexTree(n,kg,path){
   const myKg=n.r==="Kingdom"?n.n:kg;
@@ -142,6 +146,42 @@ function buildNode(n,depth){
       else{expanded.add(n.id);car.classList.add('open');cw.classList.add('open');}
     }
   });
+
+  // ── drag & drop: reorder among siblings (top/bottom edge) or reparent (middle) ──
+  row.draggable=true;
+  row.addEventListener('dragstart',e=>{
+    e.stopPropagation();
+    dragId=n.id;
+    e.dataTransfer.effectAllowed='move';
+    try{e.dataTransfer.setData('text/plain',n.id);}catch(_){}
+    row.classList.add('dragging');
+  });
+  row.addEventListener('dragend',()=>{
+    row.classList.remove('dragging');
+    clearDropMarks();
+    dragId=null;
+  });
+  row.addEventListener('dragover',e=>{
+    if(!dragId||dragId===n.id) return;
+    if(clientIsDescendant(nodeMap[dragId],n.id)) return; // can't drop into own subtree
+    e.preventDefault();e.stopPropagation();
+    e.dataTransfer.dropEffect='move';
+    const zone=dropZone(e,row);
+    row.classList.remove('drop-before','drop-inside','drop-after');
+    row.classList.add('drop-'+zone);
+  });
+  row.addEventListener('dragleave',()=>{
+    row.classList.remove('drop-before','drop-inside','drop-after');
+  });
+  row.addEventListener('drop',e=>{
+    if(!dragId||dragId===n.id) return;
+    e.preventDefault();e.stopPropagation();
+    const zone=dropZone(e,row);
+    const from=dragId;
+    row.classList.remove('drop-before','drop-inside','drop-after');
+    performTreeDrop(from,n.id,zone);
+  });
+
   wrap.appendChild(row);
   (n.c||[]).forEach(ch=>{
     if(!anyVis(ch)) return;
@@ -161,6 +201,21 @@ function rerenderTree(){
 }
 
 /* ── DETAIL RENDER ── */
+async function ensureDetailLoaded(n){
+  if(!n||n._detailLoaded) return;
+  try{
+    const res=await fetch('/api/node/'+encodeURIComponent(n.id));
+    if(res.ok){
+      const data=await res.json();
+      for(const [k,v] of Object.entries(data)){
+        if(k==='c'||k.charAt(0)==='_') continue; // keep tree structure & computed fields
+        n[k]=v;
+      }
+    }
+  }catch(e){ /* offline: render whatever is already in memory */ }
+  n._detailLoaded=true;
+}
+
 function selectNode(n){
   sel=n;
 
@@ -169,8 +224,17 @@ function selectNode(n){
   const row=document.querySelector(`.trow[data-id="${n.id}"]`);
   if(row) row.classList.add('sel');
 
+  // Render immediately from what we have; if prose isn't loaded yet, fetch the
+  // node's detail file and re-render once it arrives.
   renderDetail(n);
   ensureEntryActionButtons();
+  if(!n._detailLoaded){
+    ensureDetailLoaded(n).then(()=>{
+      if(sel!==n) return;
+      renderDetail(n);
+      ensureEntryActionButtons();
+    });
+  }
 }
 
 function entryNo(n){
@@ -492,8 +556,9 @@ function ensureEditorUI() {
   document.getElementById('edit-save').onclick = saveEditor;
 }
 
-function openEditor() {
+async function openEditor() {
   if (!sel) return;
+  await ensureDetailLoaded(sel);
   ensureEditorUI();
 
   const form = document.getElementById('edit-form');
@@ -622,10 +687,18 @@ function ensureEntryActionButtons() {
     delBtn.textContent = 'Delete';
     delBtn.onclick = deleteSelectedNode;
 
+    const sortBtn = document.createElement('button');
+    sortBtn.id = 'entry-sort-btn';
+    sortBtn.type = 'button';
+    sortBtn.textContent = 'Sort ⇅';
+    sortBtn.title = 'Auto-sort children by rank, then name';
+    sortBtn.onclick = autosortChildren;
+
     tools.appendChild(editBtn);
     tools.appendChild(addBtn);
     tools.appendChild(moveBtn);
     tools.appendChild(delBtn);
+    tools.appendChild(sortBtn);
   }
 
   rankLine.appendChild(tools);
@@ -633,9 +706,11 @@ function ensureEntryActionButtons() {
   const isRoot = ROOT && sel && sel.id === ROOT.id;
   const moveBtn = document.getElementById('entry-move-btn');
   const delBtn = document.getElementById('entry-delete-btn');
+  const sortBtn = document.getElementById('entry-sort-btn');
 
   if (moveBtn) moveBtn.disabled = isRoot;
   if (delBtn) delBtn.disabled = isRoot;
+  if (sortBtn) sortBtn.disabled = !(sel && sel.c && sel.c.length > 1);
 }
 
 function clientFindParent(root, targetId) {
@@ -972,6 +1047,98 @@ function countSubtree(n) {
   }
 
   return total;
+}
+
+/* ── DRAG & DROP / AUTOSORT ─────────────────────────────────────────────── */
+
+function dropZone(e, row){
+  const r = row.getBoundingClientRect();
+  const y = e.clientY - r.top;
+  if (y < r.height * 0.30) return 'before';
+  if (y > r.height * 0.70) return 'after';
+  return 'inside';
+}
+
+function clearDropMarks(){
+  document.querySelectorAll('.trow.drop-before,.trow.drop-inside,.trow.drop-after')
+    .forEach(el => el.classList.remove('drop-before','drop-inside','drop-after'));
+}
+
+async function performTreeDrop(draggedId, targetId, zone){
+  if (draggedId === targetId) return;
+
+  const dragged = nodeMap[draggedId];
+  const target  = nodeMap[targetId];
+  if (!dragged || !target) return;
+
+  // Never drop a node into its own subtree.
+  if (clientIsDescendant(dragged, targetId)) return;
+
+  let payload;
+
+  if (zone === 'inside') {
+    payload = { newParentId: targetId };          // become last child of target
+  } else {
+    const loc = clientFindParent(ROOT, targetId);
+    if (!loc) return;                             // target is root → no sibling slot
+    const newParentId = loc.parent.id;
+    if (clientIsDescendant(dragged, newParentId)) return;
+    payload = zone === 'before'
+      ? { newParentId, beforeId: targetId }
+      : { newParentId, afterId:  targetId };
+  }
+
+  try {
+    const res = await fetch('/api/node/' + encodeURIComponent(draggedId) + '/move', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      alert(data.error || 'Move failed.');
+      return;
+    }
+
+    if (payload.newParentId) expanded.add(payload.newParentId);
+    await reloadTreeAndSelect(draggedId);
+  } catch (err) {
+    alert('Move failed: ' + err.message);
+  }
+}
+
+async function autosortChildren(){
+  if (!sel || !(sel.c && sel.c.length > 1)) return;
+
+  const order = [...sel.c]
+    .sort((a, b) => {
+      const ra = rankIndex(a.r), rb = rankIndex(b.r);
+      if (ra !== rb) return ra - rb;
+      return String(a.n || '').localeCompare(String(b.n || ''));
+    })
+    .map(ch => ch.id);
+
+  try {
+    const res = await fetch('/api/node/' + encodeURIComponent(sel.id) + '/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order })
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      alert(data.error || 'Sort failed.');
+      return;
+    }
+
+    expanded.add(sel.id);
+    await reloadTreeAndSelect(sel.id);
+  } catch (err) {
+    alert('Sort failed: ' + err.message);
+  }
 }
 
 // ── BOOTSTRAP ──────────────────────────────────────────────────────────────

@@ -11,15 +11,25 @@
  *   GET    /                    → shell HTML
  *   GET    /style.css           → extracted stylesheet
  *   GET    /viewer.js           → viewer application JS
- *   GET    /api/clado           → full CLADO tree as JSON
- *   GET    /api/node/:id        → single node by id
- *   PUT    /api/node/:id        → update a node's prose fields
+ *   GET    /api/clado           → full CLADO tree as JSON (slim once migrated)
+ *   GET    /api/node/:id        → single node, assembled (slim node + prose detail)
+ *   PUT    /api/node/:id        → update a node's fields (prose routed to detail file)
  *   POST   /api/node            → append a new node as child of a given parent
- *   POST   /api/node/:id/move   → move/reparent an existing node
- *   DELETE /api/node/:id        → remove a node and its subtree
+ *   POST   /api/node/:id/move   → move/reparent + reorder an existing node
+ *   POST   /api/node/:id/reorder→ reorder the children of :id to a given order
+ *   DELETE /api/node/:id        → remove a node and its subtree (+ its detail files)
  *
  * Data storage:
- *   data/clado.json → the full taxonomy tree, persisted on every write
+ *   data/clado.json       → the taxonomy tree (structure + light metadata)
+ *   data/prose/<id>.json  → per-node bulk prose ("detail"), created on demand
+ *
+ * Transitional behaviour:
+ *   - READ  of a node: if data/prose/<id>.json exists → prose comes from it (new
+ *     behaviour); if not → prose is read inline from the tree node (legacy).
+ *   - WRITE of a node: prose is written to data/prose/<id>.json, creating it if
+ *     absent, and stripped from the tree node so the tree stays slim. This means
+ *     an un-migrated megatree keeps working untouched and migrates node-by-node
+ *     the first time each entry is saved. (Or migrate everything with migrate.js.)
  */
 'use strict';
 
@@ -29,6 +39,7 @@ const path = require('path');
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const DATA_FILE = path.join(__dirname, 'data', 'clado.json');
+const PROSE_DIR = path.join(__dirname, 'data', 'prose');
 const PUBLIC = path.join(__dirname, 'public');
 
 let ROOT = null;
@@ -59,12 +70,92 @@ function saveData() {
   fs.renameSync(tmp, DATA_FILE);
 }
 
+/* ── EDITABLE / DETAIL FIELD CLASSIFICATION ───────────────────────────────── */
+
+// All keys the API will accept on a write (existing allowlist; unchanged).
 const PROSE_KEYS = new Set([
   'n', 'r', 'sn', 'g', 'summary', 'tax', 'ap', 'eco', 'ecology', 'beh', 'behavior',
   'traitsText', 'traits', 'abilities', 'abil', 'bg', 'background',
   'note', 'conv', 't', 'gorge', 'ctx', 'fossil', 'theorized', 'curse', 'tag',
   'rankMismatch', 'expectedRank', 'hierarchicalRankPosition', '_kg',
 ]);
+
+// The subset of those that carry the data *bulk*. These live in per-node detail
+// files and are stripped from the tree. Everything the index/search/filters need
+// (n, r, sn, c, gorge, ctx, theorized, fossil, curse, conv, tag, rankMismatch…)
+// is deliberately NOT here, so the slim tree fully drives the index.
+const DETAIL_KEYS = new Set([
+  'summary', 'tax', 'ap', 'eco', 'ecology', 'beh', 'behavior',
+  'traitsText', 'traits', 'abilities', 'abil', 'bg', 'background', 'g', 'note',
+]);
+
+function detailPath(id) {
+  return path.join(PROSE_DIR, encodeURIComponent(String(id)) + '.json');
+}
+
+function hasDetail(id) {
+  try { return fs.existsSync(detailPath(id)); } catch { return false; }
+}
+
+function readDetail(id) {
+  try { return JSON.parse(fs.readFileSync(detailPath(id), 'utf8')); }
+  catch { return {}; }
+}
+
+function writeDetail(id, detailObj) {
+  fs.mkdirSync(PROSE_DIR, { recursive: true });
+  const p = detailPath(id);
+  const tmp = p + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(detailObj), 'utf8');
+  fs.renameSync(tmp, p);
+}
+
+function deleteDetail(id) {
+  try { fs.unlinkSync(detailPath(id)); } catch { /* nothing to remove */ }
+}
+
+// Pull any DETAIL_KEYS currently sitting inline on a tree node (legacy state).
+function inlineDetail(node) {
+  const out = {};
+  for (const k of DETAIL_KEYS) if (k in node) out[k] = node[k];
+  return out;
+}
+
+// Remove DETAIL_KEYS from a tree node so the tree stays slim.
+function stripDetail(node) {
+  for (const k of DETAIL_KEYS) if (k in node) delete node[k];
+}
+
+// Build the object sent to the client for a single node: the slim tree node's
+// own fields, plus prose from the detail file when present, else whatever prose
+// is still inline (legacy). Children are intentionally omitted — the client
+// already holds tree structure from /api/clado.
+function assembleNode(node) {
+  const out = {};
+  for (const [k, v] of Object.entries(node)) {
+    if (k === 'c') continue;
+    out[k] = v;
+  }
+  if (hasDetail(node.id)) Object.assign(out, readDetail(node.id));
+  return out;
+}
+
+// Ensure a node's prose is externalised: merge (existing file ∪ inline) ∪ updates,
+// write the detail file (creating it if absent), then strip prose from the tree.
+function persistDetail(node, updates) {
+  const detail = hasDetail(node.id) ? readDetail(node.id) : inlineDetail(node);
+  if (updates) {
+    for (const [k, v] of Object.entries(updates)) detail[k] = v;
+  }
+  // Only keep recognised detail keys in the file.
+  for (const k of Object.keys(detail)) {
+    if (!DETAIL_KEYS.has(k)) delete detail[k];
+  }
+  writeDetail(node.id, detail);
+  stripDetail(node);
+}
+
+/* ── TREE HELPERS (unchanged) ─────────────────────────────────────────────── */
 
 function findParent(root, targetId) {
   if (!root) return null;
@@ -113,6 +204,14 @@ function removeFromIndex(node) {
   if (!node || !node.id) return;
   delete nodeMap[node.id];
   for (const child of (node.c || [])) removeFromIndex(child);
+}
+
+// Collect ids of a node and all descendants (used to clean up detail files).
+function collectIds(node, out = []) {
+  if (!node || !node.id) return out;
+  out.push(node.id);
+  for (const child of (node.c || [])) collectIds(child, out);
+  return out;
 }
 
 const MIME = {
@@ -266,6 +365,48 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (method === 'POST' && pname.startsWith('/api/node/') && pname.endsWith('/reorder')) {
+    const id = decodeURIComponent(pname.slice('/api/node/'.length, -'/reorder'.length));
+    const parent = nodeMap[id];
+
+    if (!parent) {
+      sendJSON(res, 404, { error: `Node not found: ${id}` });
+      return;
+    }
+
+    const body = await readJSON(req, res);
+    if (!body) return;
+
+    const order = body.order;
+    if (!Array.isArray(order)) {
+      sendJSON(res, 400, { error: 'Requires { order: [childId, …] }' });
+      return;
+    }
+
+    const current = parent.c || [];
+    const byId = new Map(current.map(ch => [ch.id, ch]));
+
+    const isPermutation =
+      order.length === current.length &&
+      order.every(cid => byId.has(cid)) &&
+      new Set(order).size === order.length;
+
+    if (!isPermutation) {
+      sendJSON(res, 400, {
+        error: 'order must be a permutation of the current child ids',
+        expected: current.map(ch => ch.id),
+      });
+      return;
+    }
+
+    parent.c = order.map(cid => byId.get(cid));
+    saveData();
+
+    console.log(`[clad0] REORDER children of ${id}`);
+    sendJSON(res, 200, { ok: true, id, order });
+    return;
+  }
+
   if (method === 'GET' && pname.startsWith('/api/node/')) {
     const id = decodeURIComponent(pname.slice('/api/node/'.length));
     const node = nodeMap[id];
@@ -275,7 +416,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    sendJSON(res, 200, node);
+    sendJSON(res, 200, assembleNode(node));
     return;
   }
 
@@ -291,15 +432,26 @@ const server = http.createServer(async (req, res) => {
     const body = await readJSON(req, res);
     if (!body) return;
 
+    const detailUpdates = {};
     const changed = [];
+
     for (const [k, v] of Object.entries(body)) {
       if (k === 'id' || k === 'c') continue;
       if (!PROSE_KEYS.has(k) && !k.startsWith('_')) continue;
-      node[k] = v;
+
+      if (DETAIL_KEYS.has(k)) {
+        detailUpdates[k] = v;        // routed to the detail file
+      } else {
+        node[k] = v;                 // light metadata stays on the tree node
+      }
       changed.push(k);
     }
 
+    // Write prose to data/prose/<id>.json (creating it if absent) and strip the
+    // bulk from the tree node. This also migrates any prose that was still inline.
+    persistDetail(node, detailUpdates);
     saveData();
+
     console.log(`[clad0] PUT node ${id}: updated [${changed.join(', ')}]`);
     sendJSON(res, 200, { ok: true, id, changed });
     return;
@@ -336,10 +488,13 @@ const server = http.createServer(async (req, res) => {
     if (!parent.c) parent.c = [];
     parent.c.push(newNode);
     indexTree(newNode);
+
+    // Externalise the new node's prose, consistent with split mode.
+    persistDetail(newNode, null);
     saveData();
 
     console.log(`[clad0] POST node ${newNode.id} appended to ${parentId}`);
-    sendJSON(res, 201, { ok: true, id: newNode.id, parentId, node: newNode });
+    sendJSON(res, 201, { ok: true, id: newNode.id, parentId, node: assembleNode(newNode) });
     return;
   }
 
@@ -358,10 +513,12 @@ const server = http.createServer(async (req, res) => {
     }
 
     const [removed] = loc.parent.c.splice(loc.index, 1);
+    const goneIds = collectIds(removed);
     removeFromIndex(removed);
     saveData();
+    for (const gid of goneIds) deleteDetail(gid);   // clean up orphaned prose
 
-    console.log(`[clad0] DELETE node ${id}`);
+    console.log(`[clad0] DELETE node ${id} (+${goneIds.length - 1} descendants)`);
     sendJSON(res, 200, { ok: true, id, parentId: loc.parent.id });
     return;
   }
@@ -374,6 +531,7 @@ loadData();
 server.listen(PORT, () => {
   console.log(`[clad0] server running → http://localhost:${PORT}`);
   console.log(`[clad0] data file: ${DATA_FILE}`);
+  console.log(`[clad0] prose dir: ${PROSE_DIR}`);
   console.log(`[clad0] public dir: ${PUBLIC}`);
 });
 
