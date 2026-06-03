@@ -59,7 +59,7 @@ body{
 /* left margin red line */
 #left-page .margin-line{
   position:absolute;left:44px;top:0;bottom:0;width:1px;
-  background:rgba(180,60,40,.22);z-index:3;pointer-events:none;
+  background:rgba(150,120,80,.10);z-index:1;pointer-events:none;
 }
 #left-page-header{
   flex-shrink:0;padding:14px 14px 6px 48px;
@@ -759,60 +759,152 @@ body{
 
 #entry-sort-btn[disabled]{ opacity: .4; cursor: default; }
 
-/* ── tree indicators: chunk state, attachments, prose size ──────────────── */
-.tind-marks{ display:inline-flex; gap:3px; align-items:center; margin-left:6px; font-size:10px; line-height:1; }
-.tmark{ opacity:.8; }
-.tmark-stats{ color:#5a4a14; }
-.tmark-img{ color:#2e5a2a; }
-.tmark-chunk.is-chunked{ color:#8a6a2a; opacity:.85; }
-.tmark-chunk.not-chunked{ color:#b9a98a; opacity:.6; }
-.tsize{
-  margin-left:auto; padding-left:8px;
-  font-size:11px; color:#5b4630; opacity:.8;
-  font-variant: small-caps; font-variant-numeric:tabular-nums; white-space:nowrap;
-}
+/* ── tree indicators: flags, chunk state, attachments, prose/image size ──── */
 .tlbl{ display:flex; align-items:center; width:100%; }
 
-/* ── job / planning marker classes (applied via the "Marker classes" field) ─
-   Add your own freely; these are sensible defaults. They tint the tree row
-   and show as a chip on the entry. */
-.trow.mk-rework{ background:rgba(150,30,30,.14); }
-.trow.mk-todo{   background:rgba(170,120,20,.14); }
-.trow.mk-review{ background:rgba(40,90,140,.13); }
-.trow.mk-done{   background:rgba(40,110,60,.12); }
-.trow.mk-stub{   background:rgba(120,120,120,.12); }
+/* multiple custom flags, each its own colour (hue from slug) */
+.tflags{ display:inline-flex; gap:3px; margin-left:6px; flex-wrap:wrap; }
+.tflag{
+  font-size:8.5px; line-height:1.5; padding:0 5px; border-radius:7px; white-space:nowrap;
+  font-family:'EB Garamond',serif; letter-spacing:.02em;
+  background:hsl(var(--fh,40) 62% 90%); color:hsl(var(--fh,40) 55% 26%);
+  border:1px solid hsl(var(--fh,40) 45% 70%);
+}
+/* whole-row tint + solid border for species carrying a stat sheet */
+.trow.has-flags{ background:hsla(var(--flag-hue,40),70%,55%,.10); border-radius:2px; }
+.trow.has-statsheet > .tlbl{ box-shadow: inset 0 0 0 1px rgba(90,74,20,.75); border-radius:2px; }
 
-#entry-body-inner.mk-rework{ box-shadow:inset 4px 0 0 #961e1e; padding-left:14px; }
-#entry-body-inner.mk-todo{   box-shadow:inset 4px 0 0 #aa7814; padding-left:14px; }
-#entry-body-inner.mk-review{ box-shadow:inset 4px 0 0 #285a8c; padding-left:14px; }
-#entry-body-inner.mk-done{   box-shadow:inset 4px 0 0 #286e3c; padding-left:14px; }
+.tind-marks{ display:inline-flex; gap:4px; align-items:center; margin-left:auto; padding-left:8px; font-size:11px; line-height:1; }
+.tmark{ opacity:.9; }
+.tmark-stats{ color:#5a4a14; }
+.tmark-img{ color:#2e5a2a; }
+.tmark-banner{ color:#1a4a7a; }
+.tmark-banner.warn{ color:#a01818; font-weight:700; }
+.tmark-chunk{ font-size:9.5px; }
+.tmark-chunk.is-chunked{ color:#8a6a2a; }
+.tmark-chunk.not-chunked{ color:#c7b693; }
 
-.ebadge.marker{ background:#efe6d2; color:#5a4a20; border:1px solid #cbb88c; }
-.ebadge.marker.mk-rework{ background:#f3dada; color:#7a1c1c; border-color:#d8a9a9; }
-.ebadge.marker.mk-todo{   background:#f4ead0; color:#7a5a14; border-color:#d8c79a; }
-.ebadge.marker.mk-review{ background:#dde7f2; color:#1a4a7a; border-color:#a9c2d8; }
-.ebadge.marker.mk-done{   background:#dcecdf; color:#1a5a32; border-color:#a9d0b6; }
+/* prose-size pill, banded; separate image/banner pills (never combined) */
+.tsize{
+  margin-left:6px; padding:1px 5px; border-radius:8px; border:1px solid transparent;
+  font-size:9.5px; font-variant-numeric:tabular-nums; white-space:nowrap; line-height:1.5;
+}
+.tsize.band-empty{ color:#a59a86; background:#f0ece2; border-color:#e2dccb; }
+.tsize.band-stub{  color:#8a5a14; background:#f7ecd2; border-color:#e3cd97; }
+.tsize.band-ok{    color:#2e6a36; background:#e3f0e3; border-color:#b6d6b9; }
+.tsize.band-heavy{ color:#8a1c1c; background:#f6dede; border-color:#e0acac; }
+.tsize-img{    color:#2e5a2a; background:#e6f0e2; border-color:#bcd6ac; }
+.tsize-banner{ color:#1a4a7a; background:#dde8f4; border-color:#aac4e0; }
+.tsize-banner.warn{ color:#8a1c1c; background:#f6dede; border-color:#e0acac; }
 
-/* ── entry image graphic ────────────────────────────────────────────────── */
-.e-image{ margin:14px 0; text-align:center; }
-.e-image img{
-  max-width:100%; max-height:420px; border:1px solid #cbb88c;
-  background:#fbf7ee; padding:6px; box-shadow:0 1px 4px rgba(0,0,0,.12);
+/* detail flag chips */
+.ebadge.flagchip{
+  background:hsl(var(--fh,40) 62% 92%); color:hsl(var(--fh,40) 55% 24%);
+  border:1px solid hsl(var(--fh,40) 45% 68%);
 }
 
-/* ── monster stat sheet ─────────────────────────────────────────────────── */
-.statsheet .statsheet-body{
-  font-family:'EB Garamond',Georgia,serif; font-size:14px; line-height:1.5;
-  background:#fbf7ee; border:1px solid #d8c79a; border-left:4px solid #5a4a14;
-  padding:10px 14px; white-space:normal;
-}
-.statsheet .statsheet-body strong{ color:#5a4a14; }
+/* ── deific ranks (gods are not genera; pantheons are not phyla) ─────────── */
+.trank.rank-pantheon::before,.rank-stamp.rank-pantheon::before{content:'PANTHEON';}
+.trank.rank-deity::before,.rank-stamp.rank-deity::before{content:'DEITY';}
+.trank.rank-demigod::before,.rank-stamp.rank-demigod::before{content:'DEMIGOD';}
+.trank.rank-avatar::before,.rank-stamp.rank-avatar::before{content:'AVATAR';}
+.trank.rank-divine-servitor::before,.rank-stamp.rank-divine-servitor::before{content:'SERVITOR';}
+.trow:has(.trank.rank-pantheon) .tlbl{border-left-color:#b8860b}
+.trow:has(.trank.rank-deity) .tlbl{border-left-color:#caa406}
+.trow:has(.trank.rank-demigod) .tlbl{border-left-color:#9a7b1a}
+.trow:has(.trank.rank-avatar) .tlbl{border-left-color:#7a6a2a}
+.trow:has(.trank.rank-divine-servitor) .tlbl{border-left-color:#8a8a5a}
+.rank-stamp.rank-pantheon,.rank-stamp.rank-deity,.rank-stamp.rank-demigod,
+.rank-stamp.rank-avatar,.rank-stamp.rank-divine-servitor{ background:#7a5c0a; color:#fbf3d0; }
+.trank.rank-pantheon,.trank.rank-deity,.trank.rank-demigod,
+.trank.rank-avatar,.trank.rank-divine-servitor{ color:#8a6a0a; }
 
-/* ── attachment editor (stat sheet + image) ─────────────────────────────── */
-.edit-attach{ border-top:1px dashed #cbb88c; margin-top:10px; padding-top:10px; }
-.edit-attach textarea{ font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; }
+/* ── banner image (any entry): full-width header, ≤1600×900 ─────────────── */
+.e-banner{ margin:0 0 16px; }
+.e-banner img{
+  display:block; width:100%; max-width:1600px; max-height:900px;
+  object-fit:cover; margin:0 auto; background:#0c0c0c;
+  border:1px solid #cbb88c; box-shadow:0 1px 5px rgba(0,0,0,.14);
+}
+
+/* ── species block: 8:11 image (≤30%) left of the prioritised stat sheet ── */
+.species-block{ display:flex; gap:16px; align-items:flex-start; margin:14px 0 18px; flex-wrap:wrap; }
+.mon-image{ flex:0 1 30%; max-width:30%; min-width:120px; }
+.mon-image-box{
+  width:100%; aspect-ratio:8/11; overflow:hidden; border-radius:3px;
+  border:1px solid #cbb88c; box-shadow:0 1px 4px rgba(0,0,0,.18);
+  display:flex; align-items:center; justify-content:center;
+  /* black translucent gradient infill for images whose AR ≠ the box */
+  background:#0c0c0c;
+  background-image:linear-gradient(180deg, rgba(0,0,0,.65) 0%, rgba(0,0,0,.12) 22%, rgba(0,0,0,.12) 78%, rgba(0,0,0,.65) 100%);
+}
+.mon-image-box img{ max-width:100%; max-height:100%; object-fit:contain; display:block; }
+.statsheet{ flex:1 1 320px; min-width:0; }   /* statsheet legibility takes priority */
+
+/* ── 5e monster stat block card ─────────────────────────────────────────── */
+.statsheet .statsheet-body{ background:none; border:0; padding:0; }
+.sb{
+  font-family:'EB Garamond',Georgia,serif; color:#3a2a12;
+  background:#fdf6e9; border:1px solid #d8c79a; border-top:3px solid #7a2e12;
+  border-radius:3px; padding:12px 14px; box-shadow:0 1px 4px rgba(0,0,0,.12);
+}
+.sb-title{ font-family:'Cinzel','IM Fell English',serif; font-size:19px; color:#7a2e12; line-height:1.12; }
+.sb-sub{ font-style:italic; font-size:12.5px; color:#6a4a20; margin-bottom:4px; }
+.sb-rule{ height:0; border-top:1.5px solid #b8742a; margin:7px 0; }
+.sb-prop{ font-size:13px; line-height:1.5; color:#5a3a14; }
+.sb-label{ font-weight:700; color:#7a2e12; }
+.sb-abilities{ display:flex; gap:6px; text-align:center; margin:4px 0; flex-wrap:wrap; }
+.sb-ab{ flex:1 1 0; min-width:46px; background:#f6ecd6; border:1px solid #e0cda0; border-radius:3px; padding:3px 2px; }
+.sb-ab-l{ font-weight:700; font-size:11px; color:#7a2e12; letter-spacing:.05em; }
+.sb-ab-v{ font-size:12.5px; color:#3a2a12; }
+.sb-section-head{ font-family:'Cinzel',serif; font-size:13px; color:#7a2e12; border-bottom:1px solid #b8742a; margin:9px 0 4px; padding-bottom:1px; }
+.sb-entry{ font-size:13px; line-height:1.5; margin:4px 0; }
+.sb-entry-name{ font-style:italic; font-weight:700; color:#5a3a14; }
+
+/* ── attachment editor (banner/species image + 5e stat form) ────────────── */
+.edit-attach-head{ font-family:'Cinzel',serif; font-size:12px; color:#7a2e12; border-bottom:1px solid #cbb88c; margin:14px 0 8px; padding-bottom:2px; letter-spacing:.04em; }
+.edit-attach-note{ font-size:12px; color:#8a7a50; font-style:italic; margin:8px 0; }
 .edit-image-row{ flex-direction:column; align-items:stretch; }
 .edit-image-box{ display:flex; gap:12px; align-items:flex-start; }
-#edit-image-preview{ max-width:140px; max-height:140px; border:1px solid #cbb88c; background:#fbf7ee; padding:4px; }
+.edit-image-preview{ max-width:140px; max-height:140px; border:1px solid #cbb88c; background:#fbf7ee; padding:4px; }
+.edit-image-preview.banner{ max-width:100%; max-height:120px; object-fit:cover; }
 .edit-image-controls{ display:flex; flex-direction:column; gap:6px; }
-#edit-image-status{ font-size:11px; color:#7a6a40; }
+.edit-image-status{ font-size:11px; color:#7a6a40; }
+.stat-grid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px 12px; }
+.stat-grid .stat-f{ flex-direction:column; align-items:stretch; gap:2px; }
+.stat-grid .stat-f > span{ font-size:11px; color:#6a5a30; }
+.stat-list{ margin-top:10px; }
+.stat-list-head{ display:flex; align-items:center; justify-content:space-between; font-family:'Cinzel',serif; font-size:11.5px; color:#7a2e12; }
+.stat-add{ font-size:11px; padding:1px 8px; }
+.stat-item{ display:grid; grid-template-columns:1fr 2fr auto; gap:6px; align-items:start; margin:5px 0; }
+.stat-item textarea{ font-family:'EB Garamond',serif; font-size:12px; }
+.stat-del{ align-self:start; padding:1px 8px; }
+
+/* ── statblock: CR badge opposite name, spell lines ─────────────────────── */
+.sb-titlerow{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+.sb-titlerow .sb-title{ flex:1 1 auto; min-width:0; }
+.sb-cr{ flex:0 0 auto; text-align:center; border:1px solid #b8742a; border-radius:4px; padding:2px 9px; background:#f6ecd6; line-height:1.12; }
+.sb-cr-l{ display:block; font-size:8.5px; letter-spacing:.14em; color:#7a2e12; font-weight:700; }
+.sb-cr-v{ display:block; font-family:'Cinzel',serif; font-size:18px; color:#7a2e12; }
+.sb-cr-xp{ display:block; font-size:8.5px; color:#6a4a20; white-space:nowrap; }
+.sb-spell-line{ font-size:13px; line-height:1.5; margin:2px 0 2px 12px; }
+.sb-spell-l{ font-style:italic; font-weight:700; color:#5a3a14; }
+
+/* ── expanded stat-form controls ────────────────────────────────────────── */
+.stat-derived{ font-size:11px; color:#2e6a36; font-style:italic; margin:6px 0; }
+.stat-hint{ font-size:10px; color:#9a8a60; font-weight:normal; font-style:italic; }
+.stat-block{ margin-top:12px; }
+.stat-toggle-grid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:3px 14px; }
+.stat-toggle{ display:flex; align-items:center; gap:6px; font-size:12px; }
+.stat-toggle-l{ flex:1 1 auto; min-width:0; color:#5a4a20; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.stat-toggle select{ flex:0 0 auto; font-size:11px; padding:1px 2px; }
+.stat-save-prev,.stat-skill-prev{ flex:0 0 32px; text-align:right; font-variant-numeric:tabular-nums; color:#2e6a36; font-weight:700; font-size:11px; }
+.stat-inline-items{ display:flex; flex-wrap:wrap; gap:5px; }
+.stat-chip{ display:inline-flex; align-items:center; background:#f6ecd6; border:1px solid #e0cda0; border-radius:11px; padding:1px 2px 1px 7px; }
+.stat-chip-input{ border:0 !important; background:transparent !important; font-size:12px; min-width:64px; width:auto; padding:1px 2px !important; }
+.stat-chip-x{ border:0; background:transparent; color:#9a5a3a; cursor:pointer; padding:0 5px; font-size:14px; line-height:1; }
+.stat-speed-items{ display:flex; flex-direction:column; gap:4px; }
+.stat-speed-row{ display:grid; grid-template-columns:auto 1fr auto; gap:6px; align-items:center; }
+.stat-spell-body{ border-left:2px solid #e0cda0; padding-left:10px; margin-top:4px; }
+.stat-spell-items{ display:flex; flex-direction:column; gap:4px; }
+.stat-spell-slot{ display:grid; grid-template-columns:1fr 1.6fr auto; gap:6px; align-items:center; }

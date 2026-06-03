@@ -47,6 +47,12 @@ let expanded=new Set(),pgLeft=1,pgRight=2;
 let dragId=null;
 let META={}; // id -> { chunked, bytes, stats, img } (filesystem-derived indicators)
 
+// Prose-size quality bands (bytes). <15kb = stub, 15–45kb = healthy, >45kb = heavy.
+const PROSE_STUB_MAX=15*1024;
+const PROSE_HEAVY_MIN=45*1024;
+function proseBand(b){ if(!b) return 'empty'; if(b<PROSE_STUB_MAX) return 'stub'; if(b>PROSE_HEAVY_MIN) return 'heavy'; return 'ok'; }
+const BANNER_IDEAL_WIDTH=1442;
+
 // Mirror of the server's DETAIL_KEYS, for estimating prose size of un-chunked nodes.
 const CLIENT_DETAIL_KEYS=['summary','tax','ap','eco','ecology','beh','behavior',
   'traitsText','traits','abilities','abil','bg','background','g','note'];
@@ -76,8 +82,24 @@ async function loadMeta(){
   catch(e){ /* indicators degrade to inline estimates */ }
 }
 
+// Flags: a single string of human labels separated by ';' (or ','). Each becomes
+// its own chip with a stable colour derived from its slug. Legacy `css` honoured.
+function flagSlug(s){ return String(s).toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,''); }
+function flagHue(slug){ let h=0; for(let i=0;i<slug.length;i++) h=(h*31+slug.charCodeAt(i))%360; return h; }
+function parseFlags(n){
+  const raw=(n.flags!=null?n.flags:(n.css||''));
+  return String(raw).split(/[;,]/).map(s=>s.trim()).filter(Boolean).map(label=>{
+    const slug=flagSlug(label)||'flag';
+    return { label, slug, hue:flagHue(slug) };
+  });
+}
+
 const RANK_ORDER=['Domain','Kingdom','Phylum','Class','Order','Family','Genus','Species','Subspecies'];
-function rankIndex(r){const i=RANK_ORDER.indexOf(r);return i===-1?RANK_ORDER.length:i;}
+// Deific section ranks — gods are not "genera" and pantheons are not "phyla".
+const DEIFIC_RANKS=['Pantheon','Deity','Demigod','Avatar','Divine Servitor'];
+const ALL_RANKS=[...RANK_ORDER, ...DEIFIC_RANKS];
+function rankIndex(r){const i=ALL_RANKS.indexOf(r);return i===-1?ALL_RANKS.length:i;}
+function isDeific(r){ return DEIFIC_RANKS.indexOf(r)!==-1; }
 
 function indexTree(n,kg,path){
   const myKg=n.r==="Kingdom"?n.n:kg;
@@ -94,7 +116,9 @@ function vis(n){
   if(!sT&&n.theorized) return false;
   if(!sCu&&n.curse) return false;
   if(searchQ){const q=searchQ.toLowerCase();
-    return n.n.toLowerCase().includes(q)||(n.sn||"").toLowerCase().includes(q);}
+    if(n.n&&n.n.toLowerCase().startsWith(q)) return true;
+    if((n.sn||"").toLowerCase().startsWith(q)) return true;
+    return parseFlags(n).some(f=>f.label.toLowerCase().startsWith(q));}
   return true;
 }
 function anyVis(n){if(vis(n)) return true;return (n.c||[]).some(ch=>anyVis(ch));}
@@ -111,6 +135,8 @@ function displayClass(n){
 function displayLabel(n){
   if(n.tag){const t=String(n.tag);return t==='Reference'?'ref':t==='Catalogue'?'cat':t.substring(0,5).toLowerCase();}
   const rk=n.r||'';
+  if(rk==='Pantheon') return 'panth'; if(rk==='Deity') return 'deity'; if(rk==='Demigod') return 'demi';
+  if(rk==='Avatar') return 'avtr'; if(rk==='Divine Servitor') return 'serv';
   return rk==='Domain'?'dom':rk==='Kingdom'?'kgdm':rk==='Phylum'?'phyl':rk==='Class'?'class':rk==='Order'?'ordr':
     rk==='Family'?'fam':rk==='Genus'?'gen':rk==='Species'?'sp':rk.substring(0,5).toLowerCase();
 }
@@ -124,7 +150,12 @@ function buildNode(n,depth){
   if(!anyVis(n)) return null;
   const wrap=document.createElement('div');
   const row=document.createElement('div');
-  row.className='trow'+(n.rankMismatch?' rank-mismatch':'')+(n.css?(' '+n.css):'');row.dataset.id=n.id;
+  const _flags=parseFlags(n);
+  const _flagCls=_flags.map(f=>'flag-'+f.slug).join(' ');
+  const _hasSheet=(META[n.id]&&META[n.id].stats);
+  row.className='trow'+(n.rankMismatch?' rank-mismatch':'')+(_flags.length?' has-flags':'')+(_hasSheet?' has-statsheet':'')+(_flagCls?(' '+_flagCls):'');
+  row.dataset.id=n.id;
+  if(_flags.length) row.style.setProperty('--flag-hue', _flags[0].hue);
 
   for(let i=0;i<depth;i++){
     const d=document.createElement('div');d.className='tind';row.appendChild(d);
@@ -164,11 +195,23 @@ function buildNode(n,depth){
   if(n.conv){const d=document.createElement('div');d.className='tdot';d.style.background='#2a6a8a';d.title='Convergent morphology';dots.appendChild(d);}
   lbl.appendChild(dots);
 
+  // flag chips (each its own colour)
+  if(_flags.length){
+    const fc=document.createElement('div');fc.className='tflags';
+    _flags.forEach(f=>{
+      const c=document.createElement('span');c.className='tflag flag-'+f.slug;
+      c.style.setProperty('--fh',f.hue);c.textContent=f.label;c.title='Flag: '+f.label;
+      fc.appendChild(c);
+    });
+    lbl.appendChild(fc);
+  }
+
   // attachment / chunk indicators
   const ind=document.createElement('div');ind.className='tind-marks';
   const m=META[n.id]||{};
   if(m.stats){const s=document.createElement('span');s.className='tmark tmark-stats';s.textContent='▤';s.title='Has monster stat sheet';ind.appendChild(s);}
-  if(m.img){const im=document.createElement('span');im.className='tmark tmark-img';im.textContent='◳';im.title='Has image graphic';ind.appendChild(im);}
+  if(m.img){const im=document.createElement('span');im.className='tmark tmark-img';im.textContent='◳';im.title='Has species image graphic';ind.appendChild(im);}
+  if(m.banner){const b=document.createElement('span');b.className='tmark tmark-banner'+(m.bannerWarn?' warn':'');b.textContent=m.bannerWarn?'▭!':'▭';b.title=m.bannerWarn?('Banner image — width '+(m.bannerW||'?')+'px ≠ '+BANNER_IDEAL_WIDTH+'px ideal; review/crop recommended'):'Banner image';ind.appendChild(b);}
   const chunk=document.createElement('span');
   chunk.className='tmark tmark-chunk '+(isChunked(n)?'is-chunked':'not-chunked');
   chunk.textContent=isChunked(n)?'◆':'◇';
@@ -176,9 +219,12 @@ function buildNode(n,depth){
   ind.appendChild(chunk);
   lbl.appendChild(ind);
 
-  // faded prose size, right-aligned
+  // prose size pill (banded), then separate image/banner size pills
   const sz=proseBytes(n);
-  if(sz){const z=document.createElement('span');z.className='tsize';z.textContent=fmtBytes(sz);lbl.appendChild(z);}
+  if(sz){const z=document.createElement('span');z.className='tsize band-'+proseBand(sz);z.textContent=fmtBytes(sz);z.title='Prose size';lbl.appendChild(z);}
+  else {const z=document.createElement('span');z.className='tsize band-empty';z.textContent='—';z.title='No prose yet';lbl.appendChild(z);}
+  if(m.imgBytes){const z=document.createElement('span');z.className='tsize tsize-img';z.textContent='◳'+fmtBytes(m.imgBytes);z.title='Species image size';lbl.appendChild(z);}
+  if(m.bannerBytes){const z=document.createElement('span');z.className='tsize tsize-banner'+(m.bannerWarn?' warn':'');z.textContent='▭'+fmtBytes(m.bannerBytes);z.title='Banner image size'+(m.bannerW?(' ('+m.bannerW+'px)'):'');lbl.appendChild(z);}
 
   row.appendChild(lbl);
 
@@ -308,7 +354,144 @@ function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').
 function flaggedNameHTML(n,prefix){
   return (n.rankMismatch?'<span class="rank-mismatch-bang" title="Taxological rank does not match hierarchical position">!</span>':'')+escHtml(prefix||'')+escHtml(n.n||'');
 }
+/* ── 5e MONSTER STAT BLOCK ──────────────────────────────────────────────── */
+// The lore/system is 3.5e/Pathfinder, but stat sheets use 5e formatting.
+const SB_SIZES=['Tiny','Small','Medium','Large','Huge','Gargantuan'];
+const SB_ABILITIES=[['str','STR'],['dex','DEX'],['con','CON'],['int','INT'],['wis','WIS'],['cha','CHA']];
+const SB_LISTS=[['traits','Traits'],['actions','Actions'],['bonus','Bonus Actions'],['reactions','Reactions'],['legendary','Legendary Actions']];
+const SB_SPEED_TYPES=['walk','burrow','climb','fly','swim'];
+const SB_SAVE_STATES=[['','—'],['prof','proficient'],['expertise','expertise']];
+const SB_SKILL_STATES=[['','—'],['half','½ prof'],['prof','proficient'],['expertise','expertise']];
+// skill → governing ability
+const SB_SKILLS=[
+  ['Acrobatics','dex'],['Animal Handling','wis'],['Arcana','int'],['Athletics','str'],
+  ['Deception','cha'],['History','int'],['Insight','wis'],['Intimidation','cha'],
+  ['Investigation','int'],['Medicine','wis'],['Nature','int'],['Perception','wis'],
+  ['Performance','cha'],['Persuasion','cha'],['Religion','int'],['Sleight of Hand','dex'],
+  ['Stealth','dex'],['Survival','wis']
+];
+// indefinite-length inline fields (stored as arrays; legacy strings tolerated)
+const SB_INLINE=[
+  ['damageVuln','Damage Vulnerabilities'],['damageRes','Damage Resistances'],
+  ['damageImm','Damage Immunities'],['condImm','Condition Immunities'],
+  ['senses','Senses'],['languages','Languages'],['equipment','Equipment']
+];
+const SB_SPELL_ABILITIES=['INT','WIS','CHA'];
+const CR_XP={ '0':10,'1/8':25,'1/4':50,'1/2':100,'1':200,'2':450,'3':700,'4':1100,'5':1800,'6':2300,
+  '7':2900,'8':3900,'9':5000,'10':5900,'11':7200,'12':8400,'13':10000,'14':11500,'15':13000,'16':15000,
+  '17':18000,'18':20000,'19':22000,'20':25000,'21':33000,'22':41000,'23':50000,'24':62000,'25':75000,
+  '26':90000,'27':105000,'28':120000,'29':135000,'30':155000 };
+function abilMod(score){ const s=parseInt(score,10); if(isNaN(s)) return null; return Math.floor((s-10)/2); }
+function fmtMod(m){ return m==null?'—':(m>=0?'+'+m:''+m); }
+function hpAverage(formula){
+  if(!formula) return null;
+  const m=String(formula).replace(/\s+/g,'').match(/^(\d+)d(\d+)([+-]\d+)?$/i);
+  if(!m) return null;
+  const x=+m[1], y=+m[2], mod=m[3]?+m[3]:0;
+  return Math.floor(x*(y+1)/2)+mod;
+}
+function parseCR(cr){ if(cr==null||cr==='') return null; const s=String(cr).trim();
+  if(s==='1/8')return .125; if(s==='1/4')return .25; if(s==='1/2')return .5;
+  const v=parseFloat(s); return isNaN(v)?null:v; }
+// Derived proficiency bonus from CR (manual `pb` override wins if present).
+function profBonus(stats){
+  if(stats && stats.pb!=null && String(stats.pb).trim()!==''){ const p=parseInt(stats.pb,10); if(!isNaN(p)) return p; }
+  const v=parseCR(stats&&stats.cr); if(v==null||v<1) return 2; return Math.floor((v-1)/4)+2;
+}
+// Accept an array, or a legacy comma-separated string, → array of strings.
+function asList(v){ if(Array.isArray(v)) return v.map(x=>String(x).trim()).filter(Boolean);
+  if(v==null||v==='') return []; return String(v).split(/,\s*/).map(s=>s.trim()).filter(Boolean); }
+function sbList(items){
+  if(!Array.isArray(items)||!items.length) return '';
+  return items.filter(it=>it&&(it.name||it.text)).map(it=>
+    '<div class="sb-entry"><span class="sb-entry-name">'+escHtml(it.name||'')+'.</span> '+
+    renderAbilitiesMarkdown(it.text||'')+'</div>').join('');
+}
+function sbProp(label, val){ return val?('<div class="sb-prop"><span class="sb-label">'+label+'</span> '+escHtml(val)+'</div>'):''; }
+
+function renderSpeeds(s){
+  if(Array.isArray(s.speeds)&&s.speeds.length){
+    return s.speeds.filter(x=>x&&x.value).map(x=>{
+      const t=(x.type&&x.type!=='walk')?(x.type+' '):''; return t+x.value;
+    }).join(', ');
+  }
+  return s.speed||'';
+}
+function renderSaves(s, pb){
+  if(s.saves && typeof s.saves==='object' && !Array.isArray(s.saves)){
+    const parts=[];
+    SB_ABILITIES.forEach(function(p){ const k=p[0], lab=p[1]; const st=s.saves[k];
+      if(!st||st==='none'||st==='') return;
+      const mod=abilMod(s[k])||0; const add=(st==='expertise')?2*pb:pb;
+      parts.push(lab.charAt(0)+lab.slice(1).toLowerCase()+' '+fmtMod(mod+add)); });
+    return parts.join(', ');
+  }
+  return typeof s.saves==='string'?s.saves:'';
+}
+function renderSkills(s, pb){
+  if(Array.isArray(s.skills)){
+    return s.skills.filter(x=>x&&x.skill&&x.state&&x.state!=='none'&&x.state!=='').map(function(x){
+      const def=SB_SKILLS.find(function(d){return d[0]===x.skill;}); const abil=def?def[1]:'wis';
+      const mod=abilMod(s[abil])||0;
+      const add=(x.state==='expertise')?2*pb:(x.state==='half')?Math.floor(pb/2):pb;
+      return x.skill+' '+fmtMod(mod+add);
+    }).join(', ');
+  }
+  return typeof s.skills==='string'?s.skills:'';
+}
+function renderSpellcasting(s, pb){
+  const sc=s.spellcasting; if(!s.hasSpells||!sc) return '';
+  const abilKey=(sc.ability||'INT').toLowerCase(); const mod=abilMod(s[abilKey])||0;
+  const dc=8+pb+mod, atk=pb+mod;
+  const intro = (sc.note && sc.note.trim()) ? sc.note :
+    ('This creature is a'+(sc.level?(' '+sc.level):'')+' spellcaster. Its spellcasting ability is '+
+     (sc.ability||'INT')+' (spell save DC '+dc+', '+fmtMod(atk)+' to hit with spell attacks). It has the following spells prepared:');
+  let h='<div class="sb-entry"><span class="sb-entry-name">Spellcasting.</span> '+renderAbilitiesMarkdown(intro)+'</div>';
+  (Array.isArray(sc.slots)?sc.slots:[]).forEach(function(L){
+    if(L&&(L.label||L.spells)) h+='<div class="sb-spell-line"><span class="sb-spell-l">'+escHtml(L.label||'')+':</span> '+escHtml(L.spells||'')+'</div>';
+  });
+  return h;
+}
+function renderStatblock(s){
+  s=s||{};
+  const pb=profBonus(s);
+  let h='<div class="sb">';
+  // title row — name left, CR floated opposite, right
+  h+='<div class="sb-titlerow"><div class="sb-title">'+escHtml(s.name||'Unnamed Creature')+'</div>';
+  if(s.cr){ const xp=CR_XP[String(s.cr).trim()];
+    h+='<div class="sb-cr"><span class="sb-cr-l">CR</span><span class="sb-cr-v">'+escHtml(''+s.cr)+'</span>'+
+       (xp?('<span class="sb-cr-xp">'+xp.toLocaleString()+' XP</span>'):'')+'</div>'; }
+  h+='</div>';
+  const sub=[s.size,s.type].filter(Boolean).join(' ')+(s.alignment?(', '+s.alignment):'');
+  if(sub.trim()) h+='<div class="sb-sub">'+escHtml(sub)+'</div>';
+  h+='<div class="sb-rule"></div>';
+  if(s.ac) h+=sbProp('Armor Class', s.ac+(s.acNote?(' ('+s.acNote+')'):''));
+  if(s.hpFormula||s.hp){ const avg=hpAverage(s.hpFormula); h+=sbProp('Hit Points',(avg!=null?avg:(s.hp||''))+(s.hpFormula?(' ('+s.hpFormula+')'):'')); }
+  const sp=renderSpeeds(s); if(sp) h+=sbProp('Speed', sp);
+  h+='<div class="sb-rule"></div>';
+  h+='<div class="sb-abilities">';
+  SB_ABILITIES.forEach(function(pair){
+    const k=pair[0], lab=pair[1]; const sc=s[k]; const mod=abilMod(sc);
+    h+='<div class="sb-ab"><div class="sb-ab-l">'+lab+'</div><div class="sb-ab-v">'+(sc!=null&&sc!==''?escHtml(''+sc):'—')+' ('+fmtMod(mod)+')</div></div>';
+  });
+  h+='</div>';
+  h+='<div class="sb-rule"></div>';
+  const saves=renderSaves(s,pb); if(saves) h+=sbProp('Saving Throws', saves);
+  const skills=renderSkills(s,pb); if(skills) h+=sbProp('Skills', skills);
+  SB_INLINE.forEach(function(p){ const arr=asList(s[p[0]]); if(arr.length) h+=sbProp(p[1], arr.join(', ')); });
+  h+=sbProp('Proficiency Bonus', fmtMod(pb));
+  // Traits (incl. spellcasting), then the action groups
+  const traitBody=sbList(s.traits)+renderSpellcasting(s,pb);
+  if(traitBody) h+='<div class="sb-rule"></div>'+traitBody;
+  [['actions','Actions'],['bonus','Bonus Actions'],['reactions','Reactions'],['legendary','Legendary Actions']].forEach(function(p){
+    const body=sbList(s[p[0]]); if(body){ h+='<div class="sb-section-head">'+p[1]+'</div>'+body; }
+  });
+  h+='</div>';
+  return h;
+}
+
 function sectionText(n,key){
+
   const name=n.n||'This entry'; const rank=n.tag?('tagged '+n.tag):(n.r||'entry'); const kg=(!n.tag&&n._kg)?(' in the '+n._kg+' kingdom'):'';
   if(key==='summary') return firstPara(n.summary||n.g)||name+' is recorded as a '+rank+kg+' in this exact branch of the index; the entry should describe this topic only, not neighbouring branches.';
   if(key==='tax') return firstPara(n.tax)||name+' is classified at '+rank+' rank. Add diagnostic ancestry, rank criteria, and differences from neighbouring taxa before treating this entry as settled.';
@@ -400,11 +583,12 @@ function renderDetail(n){
     erkEl.appendChild(kg);
   }
   document.getElementById('pgnum-left').textContent='Index';
-  document.getElementById('pgnum-right').textContent='No. '+entryNo(n);
+  document.getElementById('pgnum-right').textContent=n.id;
   const rp=document.getElementById('right-page');
   rp.classList.remove('flip'); void rp.offsetWidth; rp.classList.add('flip');
 
-  let html='<div id="entry-body-inner"'+(n.css?(' class="'+escHtml(n.css)+'"'):'')+'>';
+  const _fl=parseFlags(n); const _flcls=_fl.map(f=>'flag-'+f.slug).join(' ');
+  let html='<div id="entry-body-inner"'+(_flcls?(' class="'+_flcls+'"'):'')+'>';
   if(n._path&&n._path.length){
     const bc=n._path.map(p=>'<span class="pa" onclick="jumpTo(\''+jsArg(p.id)+'\')">'+p.n+'</span>').join(' › ');
     html+='<div class="e-path">'+bc+' › <strong style="color:#1a1208">'+n.n+'</strong></div>';
@@ -418,14 +602,23 @@ function renderDetail(n){
   if(n.curse) badges+='<span class="ebadge curse">☠ Curse or transformation vector</span>';
   if(n.rankMismatch) badges+='<span class="ebadge curse"><span class="rank-mismatch-bang">!</span> Rank/position mismatch: expected '+escHtml(n.expectedRank||'next rank')+', marked '+escHtml(rk||'unranked')+'</span>';
   if(n.conv) badges+='<span class="ebadge conv">⚡ Convergent morphology</span>';
-  if(n.css){ String(n.css).trim().split(/\s+/).forEach(c=>{ if(c) badges+='<span class="ebadge marker '+escHtml(c)+'">⚑ '+escHtml(c)+'</span>'; }); }
+  _fl.forEach(f=>{ badges+='<span class="ebadge flagchip flag-'+f.slug+'" style="--fh:'+f.hue+'">⚑ '+escHtml(f.label)+'</span>'; });
   if(badges) html+='<div class="badge-row">'+badges+'</div>';
 
-  if(n.img){
-    html+='<div class="e-image"><img src="/media/'+encodeURIComponent(n.id)+'.'+escHtml(n.img)+'" alt="'+escHtml(n.n||'')+'"></div>';
+  // banner image (any entry) — full width, above summary & stat sheet, below meta
+  if(n.banner){
+    html+='<div class="e-banner"><img src="/media/'+encodeURIComponent(n.id)+'__banner.'+escHtml(n.banner)+'" alt="'+escHtml(n.n||'')+' banner"></div>';
   }
-  if(n.hasStats){
-    html+='<div class="e-section statsheet" id="statsheet-block"><div class="e-head">Monster Stat Sheet</div><div class="statsheet-body" id="statsheet-body">Loading…</div></div>';
+  // species only: monster image (8:11, left) beside the stat sheet (prioritised)
+  if(n.r==='Species' && (n.img || n.hasStats)){
+    html+='<div class="species-block">';
+    if(n.img){
+      html+='<div class="mon-image"><div class="mon-image-box"><img src="/media/'+encodeURIComponent(n.id)+'.'+escHtml(n.img)+'" alt="'+escHtml(n.n||'')+'"></div></div>';
+    }
+    if(n.hasStats){
+      html+='<div class="statsheet" id="statsheet-block"><div class="statsheet-body" id="statsheet-body">Loading…</div></div>';
+    }
+    html+='</div>';
   }
 
   const guideEntry = (n.tag==='Reference'||n.tag==='Catalogue');
@@ -480,8 +673,8 @@ function renderDetail(n){
         if(!el) return;
         const s=d&&d.stats;
         if(s==null){ el.textContent='(empty)'; return; }
-        const text=(typeof s==='string')?s:JSON.stringify(s,null,2);
-        el.innerHTML=renderAbilitiesMarkdown(text); // escapes, supports **bold** + line breaks
+        if(typeof s==='string'){ el.innerHTML=renderAbilitiesMarkdown(s); return; } // legacy free-text
+        el.innerHTML=renderStatblock(s);
       })
       .catch(()=>{ const el=document.getElementById('statsheet-body'); if(el) el.textContent='(failed to load stat sheet)'; });
   }
@@ -546,20 +739,25 @@ document.getElementById('btn-col').addEventListener('click',()=>{
   expanded.clear();expanded.add(ROOT.id);rerenderTree();
 });
 let st=null;
-document.getElementById('search-field').addEventListener('input',e=>{
-  clearTimeout(st);
-  st=setTimeout(()=>{
-    searchQ=e.target.value.trim();
-    if(searchQ){
-      function em(n){
-        if(n.n.toLowerCase().includes(searchQ.toLowerCase())||(n.sn||'').toLowerCase().includes(searchQ.toLowerCase())){
-          n._path.forEach(p=>expanded.add(p.id));expanded.add(n.id);
-        }(n.c||[]).forEach(em);
-      }em(ROOT);
-    }
-    rerenderTree();
-  },200);
-});
+function applyTreeSearch(){
+  const field=document.getElementById('search-field');
+  searchQ=field.value.trim();
+  if(searchQ){
+    const q=searchQ.toLowerCase();
+    (function em(n){
+      const hit=(n.n&&n.n.toLowerCase().startsWith(q))||(n.sn||'').toLowerCase().startsWith(q)||parseFlags(n).some(f=>f.label.toLowerCase().startsWith(q));
+      if(hit){ n._path.forEach(p=>expanded.add(p.id)); expanded.add(n.id); }
+      (n.c||[]).forEach(em);
+    })(ROOT);
+  }
+  rerenderTree();
+}
+function clearTreeSearch(){
+  const field=document.getElementById('search-field');
+  field.value=''; searchQ=''; rerenderTree(); field.focus();
+}
+document.getElementById('search-field').addEventListener('input',applyTreeSearch);
+{ const cb=document.getElementById('btn-clear-search'); if(cb) cb.addEventListener('click',clearTreeSearch); }
 
 
 
@@ -600,7 +798,7 @@ const EDIT_FIELDS = [
   ['tag', 'Reference tag (e.g. Reference / Catalogue)', 'text'],
   ['rankMismatch', 'Rank-position mismatch flag', 'checkbox'],
   ['expectedRank', 'Expected rank (if mismatched)', 'text'],
-  ['css', 'Marker classes (e.g. mk-rework mk-todo)', 'text']
+  ['css', 'Flags (separate with ; — e.g. To Do; New Content)', 'text']
 ];
 
 function ensureEditorUI() {
@@ -615,23 +813,7 @@ function ensureEditorUI() {
         <button id="edit-close" type="button">×</button>
       </div>
       <form id="edit-form"></form>
-      <div class="edit-attach">
-        <label class="edit-row">
-          <span>Monster stat sheet</span>
-          <textarea id="edit-stats" rows="6" placeholder="Stat block — markdown or plain text. Empty clears the sheet."></textarea>
-        </label>
-        <div class="edit-row edit-image-row">
-          <span>Image graphic</span>
-          <div class="edit-image-box">
-            <img id="edit-image-preview" alt="" />
-            <div class="edit-image-controls">
-              <input id="edit-image-file" type="file" accept="image/*" />
-              <button id="edit-image-remove" type="button">Remove image</button>
-              <span id="edit-image-status"></span>
-            </div>
-          </div>
-        </div>
-      </div>
+      <div id="edit-extra"></div>
       <div class="edit-actions">
         <button id="edit-save" type="button">Save to disk</button>
         <button id="edit-cancel" type="button">Cancel</button>
@@ -644,71 +826,299 @@ function ensureEditorUI() {
   document.getElementById('edit-close').onclick = closeEditor;
   document.getElementById('edit-cancel').onclick = closeEditor;
   document.getElementById('edit-save').onclick = saveEditor;
-  document.getElementById('edit-image-file').onchange = onImageChosen;
-  document.getElementById('edit-image-remove').onclick = onImageRemove;
 }
 
-function refreshImagePreview() {
-  const img = document.getElementById('edit-image-preview');
-  const removeBtn = document.getElementById('edit-image-remove');
-  if (!img) return;
-  if (sel && sel.img) {
-    img.src = '/media/' + encodeURIComponent(sel.id) + '.' + sel.img + '?t=' + Date.now();
-    img.style.display = '';
-    if (removeBtn) removeBtn.disabled = false;
-  } else {
-    img.removeAttribute('src');
-    img.style.display = 'none';
-    if (removeBtn) removeBtn.disabled = true;
-  }
+function imgUrl(id, kind, ext){
+  return '/media/' + encodeURIComponent(id) + (kind==='banner'?'__banner.':'.') + ext + '?t=' + Date.now();
 }
 
-async function onImageChosen(e) {
-  const file = e.target.files && e.target.files[0];
-  if (!file || !sel) return;
-  const status = document.getElementById('edit-image-status');
-  const ext = (file.name.split('.').pop() || '').toLowerCase();
-  status.textContent = 'Uploading…';
-  try {
-    const dataUrl = await new Promise((res, rej) => {
-      const fr = new FileReader();
-      fr.onload = () => res(fr.result);
-      fr.onerror = () => rej(new Error('read failed'));
-      fr.readAsDataURL(file);
-    });
-    const r = await fetch('/api/node/' + encodeURIComponent(sel.id) + '/image', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ext, filename: file.name, data: dataUrl })
-    });
-    const d = await r.json();
-    if (!r.ok) { status.textContent = d.error || 'Upload failed'; return; }
-    sel.img = d.img;
-    status.textContent = 'Image saved.';
-    refreshImagePreview();
+async function uploadImage(kind, file, statusEl, refresh){
+  if(!file || !sel) return;
+  const ext=(file.name.split('.').pop()||'').toLowerCase();
+  statusEl.textContent='Uploading…';
+  try{
+    const dataUrl=await new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=()=>rej(new Error('read failed'));fr.readAsDataURL(file);});
+    const r=await fetch('/api/node/'+encodeURIComponent(sel.id)+'/image?kind='+kind,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind,ext,filename:file.name,data:dataUrl})});
+    const d=await r.json();
+    if(!r.ok){ statusEl.textContent=d.error||'Upload failed'; return; }
+    if(kind==='banner'){ sel.banner=d.ext; statusEl.textContent=d.warn?('Saved — '+(d.w||'?')+'px wide (ideal '+BANNER_IDEAL_WIDTH+'px; review/crop recommended)'):'Banner saved.'; }
+    else { sel.img=d.ext; statusEl.textContent='Image saved.'; }
     await loadMeta(); rerenderTree(); restoreSelectionRow();
-  } catch (err) {
-    status.textContent = 'Upload failed: ' + err.message;
-  } finally {
-    e.target.value = '';
-  }
+    if(refresh) refresh();
+  }catch(err){ statusEl.textContent='Upload failed: '+err.message; }
 }
 
-async function onImageRemove() {
-  if (!sel || !sel.img) return;
-  const status = document.getElementById('edit-image-status');
-  status.textContent = 'Removing…';
-  try {
-    const r = await fetch('/api/node/' + encodeURIComponent(sel.id) + '/image', { method: 'DELETE' });
-    const d = await r.json();
-    if (!r.ok) { status.textContent = d.error || 'Remove failed'; return; }
-    sel.img = null;
-    status.textContent = 'Image removed.';
-    refreshImagePreview();
+async function removeImage(kind, statusEl, refresh){
+  if(!sel) return;
+  statusEl.textContent='Removing…';
+  try{
+    const r=await fetch('/api/node/'+encodeURIComponent(sel.id)+'/image?kind='+kind,{method:'DELETE'});
+    const d=await r.json();
+    if(!r.ok){ statusEl.textContent=d.error||'Remove failed'; return; }
+    if(kind==='banner') sel.banner=null; else sel.img=null;
+    statusEl.textContent='Removed.';
     await loadMeta(); rerenderTree(); restoreSelectionRow();
-  } catch (err) {
-    status.textContent = 'Remove failed: ' + err.message;
+    if(refresh) refresh();
+  }catch(err){ statusEl.textContent='Remove failed: '+err.message; }
+}
+
+// An image-upload control (monster icon or banner) as a DOM node.
+function imageControl(kind, label){
+  const wrap=document.createElement('div'); wrap.className='edit-row edit-image-row';
+  const title=document.createElement('span'); title.textContent=label; wrap.appendChild(title);
+  const box=document.createElement('div'); box.className='edit-image-box';
+  const img=document.createElement('img'); img.className='edit-image-preview'+(kind==='banner'?' banner':''); img.alt='';
+  const controls=document.createElement('div'); controls.className='edit-image-controls';
+  const file=document.createElement('input'); file.type='file'; file.accept='image/png,image/webp,image/jpeg,image/gif,image/svg+xml';
+  const rm=document.createElement('button'); rm.type='button'; rm.textContent='Remove';
+  const status=document.createElement('span'); status.className='edit-image-status';
+  controls.appendChild(file); controls.appendChild(rm); controls.appendChild(status);
+  box.appendChild(img); box.appendChild(controls); wrap.appendChild(box);
+  function refresh(){
+    const ext = kind==='banner' ? sel.banner : sel.img;
+    if(ext){ img.src=imgUrl(sel.id,kind,ext); img.style.display=''; rm.disabled=false; }
+    else { img.removeAttribute('src'); img.style.display='none'; rm.disabled=true; }
   }
+  file.onchange=e=>{ const f=e.target.files&&e.target.files[0]; if(f) uploadImage(kind,f,status,refresh); e.target.value=''; };
+  rm.onclick=()=>removeImage(kind,status,refresh);
+  refresh();
+  return wrap;
+}
+
+/* 5e stat-sheet form */
+const STAT_FIELDS=[
+  ['name','Creature name','text'],['size','Size','select'],['type','Type','text'],['alignment','Alignment','text'],
+  ['ac','Armor Class','text'],['acNote','AC note','text'],
+  ['hpFormula','Hit Point formula (e.g. 18d10+36)','text'],
+  ['str','STR','num'],['dex','DEX','num'],['con','CON','num'],['int','INT','num'],['wis','WIS','num'],['cha','CHA','num'],
+  ['cr','Challenge Rating','text'],['pb','Proficiency override (blank = from CR)','num']
+];
+const STAT_LISTS=[['traits','Traits'],['actions','Actions'],['bonus','Bonus Actions'],['reactions','Reactions'],['legendary','Legendary Actions']];
+
+function buildStatForm(container, stats){
+  stats=stats||{};
+  container.innerHTML='';
+
+  // ── core grid ──
+  const grid=document.createElement('div'); grid.className='stat-grid';
+  STAT_FIELDS.forEach(function(f){
+    const key=f[0], label=f[1], type=f[2];
+    const row=document.createElement('label'); row.className='edit-row stat-f';
+    const t=document.createElement('span'); t.textContent=label; row.appendChild(t);
+    let input;
+    if(type==='select'){ input=document.createElement('select'); [''].concat(SB_SIZES).forEach(function(o){const op=document.createElement('option');op.value=o;op.textContent=o||'—';input.appendChild(op);}); input.value=stats[key]||''; }
+    else { input=document.createElement('input'); input.type=(type==='num'?'number':'text'); input.value=stats[key]!=null?stats[key]:''; }
+    input.dataset.statKey=key; row.appendChild(input); grid.appendChild(row);
+  });
+  container.appendChild(grid);
+
+  const deriv=document.createElement('div'); deriv.className='stat-derived'; deriv.id='stat-derived-pb';
+  container.appendChild(deriv);
+
+  // ── speeds (multiple movement types) ──
+  const spd=document.createElement('div'); spd.className='stat-block';
+  const spdHead=document.createElement('div'); spdHead.className='stat-list-head'; spdHead.textContent='Speed';
+  const spdAdd=document.createElement('button'); spdAdd.type='button'; spdAdd.className='stat-add'; spdAdd.textContent='+ add';
+  spdHead.appendChild(spdAdd); spd.appendChild(spdHead);
+  const spdItems=document.createElement('div'); spdItems.className='stat-speed-items'; spd.appendChild(spdItems);
+  function addSpeed(it){
+    it=it||{type:'walk',value:''};
+    const r=document.createElement('div'); r.className='stat-speed-row';
+    const sel=document.createElement('select'); sel.className='stat-speed-type';
+    SB_SPEED_TYPES.forEach(function(t){const o=document.createElement('option');o.value=t;o.textContent=t;sel.appendChild(o);}); sel.value=it.type||'walk';
+    const val=document.createElement('input'); val.type='text'; val.className='stat-speed-value'; val.placeholder='30 ft.'; val.value=it.value||'';
+    const del=document.createElement('button'); del.type='button'; del.className='stat-del'; del.textContent='×'; del.onclick=function(){r.remove();};
+    r.appendChild(sel); r.appendChild(val); r.appendChild(del); spdItems.appendChild(r);
+  }
+  const seedSpeeds=Array.isArray(stats.speeds)?stats.speeds:(stats.speed?[{type:'walk',value:stats.speed}]:[]);
+  seedSpeeds.forEach(addSpeed); spdAdd.onclick=function(){addSpeed();};
+  container.appendChild(spd);
+
+  // ── saving throws (toggles → derived) ──
+  const curSaves=(stats.saves&&typeof stats.saves==='object'&&!Array.isArray(stats.saves))?stats.saves:{};
+  const savesSec=document.createElement('div'); savesSec.className='stat-block';
+  savesSec.innerHTML='<div class="stat-list-head">Saving Throws <span class="stat-hint">(only proficient shown)</span></div>';
+  const savesGrid=document.createElement('div'); savesGrid.className='stat-toggle-grid';
+  SB_ABILITIES.forEach(function(p){
+    const k=p[0], lab=p[1];
+    const row=document.createElement('div'); row.className='stat-toggle';
+    const t=document.createElement('span'); t.className='stat-toggle-l'; t.textContent=lab;
+    const sel=document.createElement('select'); sel.dataset.save=k;
+    SB_SAVE_STATES.forEach(function(o){const op=document.createElement('option');op.value=o[0];op.textContent=o[1];sel.appendChild(op);}); sel.value=curSaves[k]||'';
+    const prev=document.createElement('span'); prev.className='stat-save-prev';
+    row.appendChild(t); row.appendChild(sel); row.appendChild(prev); savesGrid.appendChild(row);
+  });
+  savesSec.appendChild(savesGrid); container.appendChild(savesSec);
+
+  // ── skills (none / ½ / proficient / expertise → derived) ──
+  const curSkills={}; if(Array.isArray(stats.skills)) stats.skills.forEach(function(x){ if(x&&x.skill) curSkills[x.skill]=x.state; });
+  const skillsSec=document.createElement('div'); skillsSec.className='stat-block';
+  skillsSec.innerHTML='<div class="stat-list-head">Skills <span class="stat-hint">(only proficient shown)</span></div>';
+  const skillsGrid=document.createElement('div'); skillsGrid.className='stat-toggle-grid';
+  SB_SKILLS.forEach(function(p){
+    const name=p[0], abil=p[1];
+    const row=document.createElement('div'); row.className='stat-toggle';
+    const t=document.createElement('span'); t.className='stat-toggle-l'; t.textContent=name+' ('+abil+')';
+    const sel=document.createElement('select'); sel.dataset.skill=name; sel.dataset.abil=abil;
+    SB_SKILL_STATES.forEach(function(o){const op=document.createElement('option');op.value=o[0];op.textContent=o[1];sel.appendChild(op);}); sel.value=curSkills[name]||'';
+    const prev=document.createElement('span'); prev.className='stat-skill-prev';
+    row.appendChild(t); row.appendChild(sel); row.appendChild(prev); skillsGrid.appendChild(row);
+  });
+  skillsSec.appendChild(skillsGrid); container.appendChild(skillsSec);
+
+  // ── indefinite-length inline fields (chips) ──
+  SB_INLINE.forEach(function(p){
+    const key=p[0], label=p[1];
+    const sec=document.createElement('div'); sec.className='stat-inline'; sec.dataset.inlineKey=key;
+    const head=document.createElement('div'); head.className='stat-list-head'; head.textContent=label;
+    const add=document.createElement('button'); add.type='button'; add.className='stat-add'; add.textContent='+ add';
+    head.appendChild(add); sec.appendChild(head);
+    const items=document.createElement('div'); items.className='stat-inline-items'; sec.appendChild(items);
+    function addChip(v){
+      const chip=document.createElement('span'); chip.className='stat-chip';
+      const inp=document.createElement('input'); inp.type='text'; inp.className='stat-chip-input'; inp.value=v||'';
+      const x=document.createElement('button'); x.type='button'; x.className='stat-chip-x'; x.textContent='×'; x.onclick=function(){chip.remove();};
+      chip.appendChild(inp); chip.appendChild(x); items.appendChild(chip); if(!v) inp.focus();
+    }
+    asList(stats[key]).forEach(addChip); add.onclick=function(){addChip('');};
+    container.appendChild(sec);
+  });
+
+  // ── {name,text} lists: traits / actions / bonus / reactions / legendary ──
+  STAT_LISTS.forEach(function(L){
+    const key=L[0], label=L[1];
+    const sec=document.createElement('div'); sec.className='stat-list'; sec.dataset.listKey=key;
+    const head=document.createElement('div'); head.className='stat-list-head'; head.textContent=label;
+    const add=document.createElement('button'); add.type='button'; add.className='stat-add'; add.textContent='+ add';
+    head.appendChild(add); sec.appendChild(head);
+    const items=document.createElement('div'); items.className='stat-items'; sec.appendChild(items);
+    function addItem(it){
+      it=it||{};
+      const r=document.createElement('div'); r.className='stat-item';
+      const nm=document.createElement('input'); nm.type='text'; nm.placeholder='name'; nm.className='stat-item-name'; nm.value=it.name||'';
+      const tx=document.createElement('textarea'); tx.rows=2; tx.placeholder='text (supports **bold**)'; tx.className='stat-item-text'; tx.value=it.text||'';
+      const del=document.createElement('button'); del.type='button'; del.className='stat-del'; del.textContent='×'; del.onclick=function(){r.remove();};
+      r.appendChild(nm); r.appendChild(tx); r.appendChild(del); items.appendChild(r);
+    }
+    (Array.isArray(stats[key])?stats[key]:[]).forEach(addItem); add.onclick=function(){addItem();};
+    container.appendChild(sec);
+  });
+
+  // ── spellcasting (only revealed when "Has spells" is on) ──
+  const sc=stats.spellcasting||{};
+  const spSec=document.createElement('div'); spSec.className='stat-block';
+  const spHead=document.createElement('div'); spHead.className='stat-list-head'; spHead.textContent='Spellcasting';
+  spSec.appendChild(spHead);
+  const tRow=document.createElement('label'); tRow.className='edit-row';
+  const tT=document.createElement('span'); tT.textContent='Has spells';
+  const tgl=document.createElement('input'); tgl.type='checkbox'; tgl.id='edit-has-spells'; tgl.checked=!!stats.hasSpells;
+  tRow.appendChild(tT); tRow.appendChild(tgl); spSec.appendChild(tRow);
+  const spBody=document.createElement('div'); spBody.className='stat-spell-body'; spSec.appendChild(spBody);
+
+  const aRow=document.createElement('label'); aRow.className='edit-row stat-f';
+  const aT=document.createElement('span'); aT.textContent='Spellcasting ability';
+  const aSel=document.createElement('select'); aSel.dataset.spellAbility='1';
+  SB_SPELL_ABILITIES.forEach(function(o){const op=document.createElement('option');op.value=o;op.textContent=o;aSel.appendChild(op);}); aSel.value=sc.ability||'INT';
+  aRow.appendChild(aT); aRow.appendChild(aSel); spBody.appendChild(aRow);
+
+  const lRow=document.createElement('label'); lRow.className='edit-row stat-f';
+  const lT=document.createElement('span'); lT.textContent='Caster level (e.g. 9th-level)'; const lIn=document.createElement('input'); lIn.type='text'; lIn.dataset.spellLevel='1'; lIn.value=sc.level||'';
+  lRow.appendChild(lT); lRow.appendChild(lIn); spBody.appendChild(lRow);
+
+  const nRow=document.createElement('label'); nRow.className='edit-row stat-f';
+  const nT=document.createElement('span'); nT.textContent='Intro override (optional)'; const nIn=document.createElement('textarea'); nIn.rows=2; nIn.dataset.spellNote='1'; nIn.value=sc.note||'';
+  nRow.appendChild(nT); nRow.appendChild(nIn); spBody.appendChild(nRow);
+
+  const spPrev=document.createElement('div'); spPrev.className='stat-derived'; spPrev.id='stat-spell-prev'; spBody.appendChild(spPrev);
+
+  const slots=document.createElement('div'); slots.className='stat-spell-slots';
+  const slotsHead=document.createElement('div'); slotsHead.className='stat-list-head'; slotsHead.textContent='Spell levels';
+  const slotsAdd=document.createElement('button'); slotsAdd.type='button'; slotsAdd.className='stat-add'; slotsAdd.textContent='+ add';
+  slotsHead.appendChild(slotsAdd); slots.appendChild(slotsHead);
+  const slotsItems=document.createElement('div'); slotsItems.className='stat-spell-items'; slots.appendChild(slotsItems);
+  function addSlot(it){
+    it=it||{};
+    const r=document.createElement('div'); r.className='stat-spell-slot';
+    const lab=document.createElement('input'); lab.type='text'; lab.className='stat-spell-label'; lab.placeholder='Cantrips (at will)'; lab.value=it.label||'';
+    const sp=document.createElement('input'); sp.type='text'; sp.className='stat-spell-spells'; sp.placeholder='fire bolt, light, mage hand'; sp.value=it.spells||'';
+    const del=document.createElement('button'); del.type='button'; del.className='stat-del'; del.textContent='×'; del.onclick=function(){r.remove();};
+    r.appendChild(lab); r.appendChild(sp); r.appendChild(del); slotsItems.appendChild(r);
+  }
+  (Array.isArray(sc.slots)?sc.slots:[]).forEach(addSlot); slotsAdd.onclick=function(){addSlot();};
+  spBody.appendChild(slots);
+  function syncSpells(){ spBody.style.display=tgl.checked?'':'none'; }
+  tgl.onchange=function(){ syncSpells(); recompute(); };
+  container.appendChild(spSec);
+
+  // ── live derived previews ──
+  function curScore(k){ const el=container.querySelector('[data-stat-key="'+k+'"]'); return el?el.value:''; }
+  function curPB(){
+    const ov=container.querySelector('[data-stat-key="pb"]');
+    if(ov&&String(ov.value).trim()!==''){ const p=parseInt(ov.value,10); if(!isNaN(p)) return p; }
+    const cr=container.querySelector('[data-stat-key="cr"]'); const v=parseCR(cr?cr.value:'');
+    if(v==null||v<1) return 2; return Math.floor((v-1)/4)+2;
+  }
+  function recompute(){
+    const pb=curPB();
+    const pd=container.querySelector('#stat-derived-pb'); if(pd) pd.textContent='Derived proficiency bonus: '+fmtMod(pb);
+    container.querySelectorAll('[data-save]').forEach(function(sel){
+      const prev=sel.parentNode.querySelector('.stat-save-prev'); const st=sel.value;
+      if(!st){ if(prev) prev.textContent=''; return; }
+      const mod=abilMod(curScore(sel.dataset.save))||0; const add=(st==='expertise')?2*pb:pb;
+      if(prev) prev.textContent=fmtMod(mod+add);
+    });
+    container.querySelectorAll('[data-skill]').forEach(function(sel){
+      const prev=sel.parentNode.querySelector('.stat-skill-prev'); const st=sel.value;
+      if(!st){ if(prev) prev.textContent=''; return; }
+      const mod=abilMod(curScore(sel.dataset.abil))||0;
+      const add=(st==='expertise')?2*pb:(st==='half')?Math.floor(pb/2):pb;
+      if(prev) prev.textContent=fmtMod(mod+add);
+    });
+    const sp=container.querySelector('[data-spell-ability]'); const spPrevEl=container.querySelector('#stat-spell-prev');
+    if(sp&&spPrevEl){ const mod=abilMod(curScore(sp.value.toLowerCase()))||0; spPrevEl.textContent='Spell save DC '+(8+pb+mod)+', '+fmtMod(pb+mod)+' to hit with spell attacks'; }
+  }
+  container.addEventListener('input', recompute);
+  container.addEventListener('change', recompute);
+  syncSpells(); recompute();
+}
+
+function readStatForm(container){
+  const out={};
+  container.querySelectorAll('[data-stat-key]').forEach(function(inp){ const v=String(inp.value).trim(); if(v) out[inp.dataset.statKey]=v; });
+  const speeds=[];
+  container.querySelectorAll('.stat-speed-row').forEach(function(r){
+    const type=r.querySelector('.stat-speed-type').value; const value=r.querySelector('.stat-speed-value').value.trim();
+    if(value) speeds.push({type:type,value:value});
+  });
+  if(speeds.length) out.speeds=speeds;
+  const saves={}; container.querySelectorAll('[data-save]').forEach(function(sel){ if(sel.value) saves[sel.dataset.save]=sel.value; });
+  if(Object.keys(saves).length) out.saves=saves;
+  const skills=[]; container.querySelectorAll('[data-skill]').forEach(function(sel){ if(sel.value) skills.push({skill:sel.dataset.skill,state:sel.value}); });
+  if(skills.length) out.skills=skills;
+  container.querySelectorAll('.stat-inline').forEach(function(sec){
+    const arr=[]; sec.querySelectorAll('.stat-chip-input').forEach(function(i){ const v=i.value.trim(); if(v) arr.push(v); });
+    if(arr.length) out[sec.dataset.inlineKey]=arr;
+  });
+  container.querySelectorAll('.stat-list').forEach(function(sec){
+    const arr=[];
+    sec.querySelectorAll('.stat-item').forEach(function(it){
+      const name=it.querySelector('.stat-item-name').value.trim(); const text=it.querySelector('.stat-item-text').value.trim();
+      if(name||text) arr.push({name:name,text:text});
+    });
+    if(arr.length) out[sec.dataset.listKey]=arr;
+  });
+  const tgl=container.querySelector('#edit-has-spells');
+  if(tgl&&tgl.checked){
+    const ab=container.querySelector('[data-spell-ability]'); const lv=container.querySelector('[data-spell-level]'); const nt=container.querySelector('[data-spell-note]');
+    const slots=[];
+    container.querySelectorAll('.stat-spell-slot').forEach(function(r){
+      const label=r.querySelector('.stat-spell-label').value.trim(); const spells=r.querySelector('.stat-spell-spells').value.trim();
+      if(label||spells) slots.push({label:label,spells:spells});
+    });
+    out.hasSpells=true;
+    out.spellcasting={ ability: ab?ab.value:'INT', level: lv?lv.value.trim():'', note: nt?nt.value.trim():'', slots:slots };
+  }
+  return Object.keys(out).length?out:null;
 }
 
 function restoreSelectionRow() {
@@ -724,53 +1134,52 @@ async function openEditor() {
 
   const form = document.getElementById('edit-form');
   form.innerHTML = '';
-
   for (const [key, label, type] of EDIT_FIELDS) {
-    const row = document.createElement('label');
-    row.className = 'edit-row';
-
-    const title = document.createElement('span');
-    title.textContent = label;
-    row.appendChild(title);
-
+    const row = document.createElement('label'); row.className = 'edit-row';
+    const title = document.createElement('span'); title.textContent = label; row.appendChild(title);
     let input;
-    if (type === 'textarea') {
-      input = document.createElement('textarea');
-      input.rows = 4;
-      input.value = sel[key] || '';
-    } else if (type === 'checkbox') {
-      input = document.createElement('input');
-      input.type = 'checkbox';
-      input.checked = !!sel[key];
-    } else {
-      input = document.createElement('input');
-      input.type = 'text';
-      input.value = sel[key] || '';
-    }
+    if (type === 'textarea') { input = document.createElement('textarea'); input.rows = 4; input.value = sel[key] || ''; }
+    else if (type === 'checkbox') { input = document.createElement('input'); input.type = 'checkbox'; input.checked = !!sel[key]; }
+    else { input = document.createElement('input'); input.type = 'text'; input.value = sel[key] || ''; }
+    input.name = key; row.appendChild(input); form.appendChild(row);
+  }
 
-    input.name = key;
-    row.appendChild(input);
-    form.appendChild(row);
+  const extra=document.getElementById('edit-extra');
+  extra.innerHTML='';
+  const isSpecies = sel.r==='Species';
+
+  const bHead=document.createElement('div'); bHead.className='edit-attach-head';
+  bHead.textContent='Banner image (any entry — full-width header, ideal '+BANNER_IDEAL_WIDTH+'px wide)';
+  extra.appendChild(bHead);
+  extra.appendChild(imageControl('banner','Banner image'));
+
+  if(isSpecies){
+    const mHead=document.createElement('div'); mHead.className='edit-attach-head'; mHead.textContent='Species image (8:11 icon, shown beside the stat sheet)';
+    extra.appendChild(mHead);
+    extra.appendChild(imageControl('monster','Species image'));
+
+    const sHead=document.createElement('div'); sHead.className='edit-attach-head'; sHead.textContent='Monster stat sheet (5e)';
+    extra.appendChild(sHead);
+    const tRow=document.createElement('label'); tRow.className='edit-row';
+    const tT=document.createElement('span'); tT.textContent='Has stat sheet';
+    const tgl=document.createElement('input'); tgl.type='checkbox'; tgl.id='edit-has-stats'; tgl.checked=!!sel.hasStats;
+    tRow.appendChild(tT); tRow.appendChild(tgl); extra.appendChild(tRow);
+    const sform=document.createElement('div'); sform.id='edit-stat-form'; sform.className='stat-form'; extra.appendChild(sform);
+    function syncSheet(){ sform.style.display=tgl.checked?'':'none'; }
+    tgl.onchange=syncSheet;
+    buildStatForm(sform, {});
+    fetch('/api/node/'+encodeURIComponent(sel.id)+'/stats').then(r=>r.ok?r.json():null).then(d=>{
+      const s=(d&&d.stats&&typeof d.stats==='object')?d.stats:{};
+      buildStatForm(sform, s);
+    }).catch(()=>{});
+    syncSheet();
+  } else {
+    const note=document.createElement('div'); note.className='edit-attach-note';
+    note.textContent='Stat sheet and species image are available only on Species-rank entries.';
+    extra.appendChild(note);
   }
 
   document.getElementById('edit-status').textContent = '';
-
-  // load attachments for this entry
-  const statsEl = document.getElementById('edit-stats');
-  statsEl.value = '';
-  statsEl.dataset.original = '';
-  fetch('/api/node/' + encodeURIComponent(sel.id) + '/stats')
-    .then(r => r.ok ? r.json() : null)
-    .then(d => {
-      const s = d && d.stats;
-      const text = (s == null) ? '' : (typeof s === 'string' ? s : JSON.stringify(s, null, 2));
-      statsEl.value = text;
-      statsEl.dataset.original = text;
-    })
-    .catch(() => {});
-  document.getElementById('edit-image-status').textContent = '';
-  refreshImagePreview();
-
   document.getElementById('edit-panel').classList.add('open');
 }
 
@@ -812,18 +1221,18 @@ async function saveEditor() {
     return;
   }
 
-  // Persist the monster stat sheet if it changed (empty clears it).
-  const statsEl = document.getElementById('edit-stats');
-  if (statsEl && statsEl.value !== (statsEl.dataset.original || '')) {
-    const sres = await fetch('/api/node/' + encodeURIComponent(sel.id) + '/stats', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stats: statsEl.value })
-    });
-    if (sres.ok) {
-      const sd = await sres.json();
-      sel.hasStats = !!sd.hasStats;
-      statsEl.dataset.original = statsEl.value;
+  // Persist the 5e stat sheet (species only; toggle off or empty clears it).
+  if (sel.r === 'Species') {
+    const tgl = document.getElementById('edit-has-stats');
+    const sform = document.getElementById('edit-stat-form');
+    if (tgl && sform) {
+      const stats = tgl.checked ? readStatForm(sform) : null;
+      const sres = await fetch('/api/node/' + encodeURIComponent(sel.id) + '/stats', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stats: stats || {} })
+      });
+      if (sres.ok) { const sd = await sres.json(); sel.hasStats = !!sd.hasStats; }
     }
   }
 

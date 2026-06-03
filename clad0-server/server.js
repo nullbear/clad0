@@ -82,7 +82,7 @@ const PROSE_KEYS = new Set([
   'n', 'r', 'sn', 'g', 'summary', 'tax', 'ap', 'eco', 'ecology', 'beh', 'behavior',
   'traitsText', 'traits', 'abilities', 'abil', 'bg', 'background',
   'note', 'conv', 't', 'gorge', 'ctx', 'fossil', 'theorized', 'curse', 'tag',
-  'rankMismatch', 'expectedRank', 'hierarchicalRankPosition', 'css', '_kg',
+  'rankMismatch', 'expectedRank', 'hierarchicalRankPosition', 'css', 'flags', '_kg',
 ]);
 
 // The subset of those that carry the data *bulk*. These live in per-node detail
@@ -146,22 +146,66 @@ function deleteStats(id) {
   try { fs.unlinkSync(statsPath(id)); } catch { /* nothing to remove */ }
 }
 
-// An id's image is stored as MEDIA_DIR/<id>.<ext>. Returns the extension, or null.
-function imageExt(id) {
+// Images come in two kinds:
+//   'monster' (species icon)   → MEDIA_DIR/<id>.<ext>
+//   'banner'  (any entry)      → MEDIA_DIR/<id>__banner.<ext>
+// A fixed id keeps the on-disk name stable so re-uploads overwrite cleanly.
+const BANNER_IDEAL_WIDTH = 1442;
+
+function imageBase(id, kind) {
+  return encodeURIComponent(String(id)) + (kind === 'banner' ? '__banner' : '');
+}
+
+function imageExt(id, kind) {
   for (const ext of IMAGE_EXT) {
-    if (fs.existsSync(path.join(MEDIA_DIR, encodeURIComponent(String(id)) + '.' + ext))) return ext;
+    if (fs.existsSync(path.join(MEDIA_DIR, imageBase(id, kind) + '.' + ext))) return ext;
   }
   return null;
 }
 
-function imagePath(id, ext) {
-  return path.join(MEDIA_DIR, encodeURIComponent(String(id)) + '.' + ext);
+function imagePath(id, kind, ext) {
+  return path.join(MEDIA_DIR, imageBase(id, kind) + '.' + ext);
 }
 
-function deleteImage(id) {
+function deleteImage(id, kind) {
   for (const ext of IMAGE_EXT) {
-    try { fs.unlinkSync(imagePath(id, ext)); } catch { /* ignore */ }
+    try { fs.unlinkSync(imagePath(id, kind, ext)); } catch { /* ignore */ }
   }
+}
+
+// Minimal image dimension reader for the formats contributors use (png/webp/
+// gif/jpeg). Returns { w, h } or null. Used mainly to validate banner width.
+function imageSize(buf, ext) {
+  try {
+    if (ext === 'png' && buf.length >= 24 && buf.toString('ascii', 12, 16) === 'IHDR') {
+      return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+    }
+    if (ext === 'gif' && buf.length >= 10) {
+      return { w: buf.readUInt16LE(6), h: buf.readUInt16LE(8) };
+    }
+    if ((ext === 'jpg' || ext === 'jpeg') && buf[0] === 0xFF && buf[1] === 0xD8) {
+      let o = 2;
+      while (o + 9 < buf.length) {
+        if (buf[o] !== 0xFF) { o++; continue; }
+        const m = buf[o + 1];
+        if (m >= 0xC0 && m <= 0xCF && m !== 0xC4 && m !== 0xC8 && m !== 0xCC) {
+          return { h: buf.readUInt16BE(o + 5), w: buf.readUInt16BE(o + 7) };
+        }
+        o += 2 + buf.readUInt16BE(o + 2);
+      }
+    }
+    if (ext === 'webp' && buf.length >= 30 && buf.toString('ascii', 0, 4) === 'RIFF'
+        && buf.toString('ascii', 8, 12) === 'WEBP') {
+      const fourcc = buf.toString('ascii', 12, 16);
+      if (fourcc === 'VP8X') return { w: 1 + buf.readUIntLE(24, 3), h: 1 + buf.readUIntLE(27, 3) };
+      if (fourcc === 'VP8 ') return { w: buf.readUInt16LE(26) & 0x3FFF, h: buf.readUInt16LE(28) & 0x3FFF };
+      if (fourcc === 'VP8L') {
+        const b = buf.readUInt32LE(21);
+        return { w: (b & 0x3FFF) + 1, h: ((b >> 14) & 0x3FFF) + 1 };
+      }
+    }
+  } catch { /* fall through */ }
+  return null;
 }
 
 // Build the lightweight indicator map the tree uses: which nodes have chunked
@@ -191,7 +235,21 @@ function buildMeta() {
     if (dot < 0) continue;
     const ext = f.slice(dot + 1).toLowerCase();
     if (!IMAGE_EXT.has(ext)) continue;
-    bump(decodeURIComponent(f.slice(0, dot)), { img: ext });
+    const stem = f.slice(0, dot);
+    let bytes = 0; let buf = null;
+    try { buf = fs.readFileSync(path.join(MEDIA_DIR, f)); bytes = buf.length; } catch {}
+    const dims = buf ? imageSize(buf, ext) : null;
+    if (stem.endsWith('__banner')) {
+      const id = decodeURIComponent(stem.slice(0, -'__banner'.length));
+      bump(id, {
+        banner: ext, bannerBytes: bytes,
+        bannerW: dims ? dims.w : null, bannerH: dims ? dims.h : null,
+        bannerWarn: dims ? (dims.w !== BANNER_IDEAL_WIDTH) : true,
+      });
+    } else {
+      const id = decodeURIComponent(stem);
+      bump(id, { img: ext, imgBytes: bytes, imgW: dims ? dims.w : null, imgH: dims ? dims.h : null });
+    }
   }
   return out;
 }
@@ -219,8 +277,10 @@ function assembleNode(node) {
     out[k] = v;
   }
   if (hasDetail(node.id)) Object.assign(out, readDetail(node.id));
-  const ext = imageExt(node.id);
-  if (ext) out.img = ext;            // image graphic present (filesystem-derived)
+  const ext = imageExt(node.id, 'monster');
+  if (ext) out.img = ext;            // species icon (filesystem-derived)
+  const bext = imageExt(node.id, 'banner');
+  if (bext) out.banner = bext;       // banner image (any entry)
   if (hasStats(node.id)) out.hasStats = true;
   return out;
 }
@@ -529,9 +589,14 @@ const server = http.createServer(async (req, res) => {
       const body = await readJSON(req, res);
       if (!body) return;
       const stats = body.stats;
+      const empty = stats == null || (typeof stats === 'string' && stats.trim() === '') ||
+          (typeof stats === 'object' && Object.keys(stats).length === 0);
+      if (!empty && nodeMap[id].r !== 'Species') {
+        sendJSON(res, 400, { error: 'Monster stat sheets are only allowed on Species-rank entries' });
+        return;
+      }
       // Empty / null clears the sheet (and its indicator); anything else is stored verbatim.
-      if (stats == null || (typeof stats === 'string' && stats.trim() === '') ||
-          (typeof stats === 'object' && Object.keys(stats).length === 0)) {
+      if (empty) {
         deleteStats(id);
         console.log(`[clad0] STATS cleared for ${id}`);
         sendJSON(res, 200, { ok: true, id, hasStats: false });
@@ -546,35 +611,46 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // ── image graphics ──
+  // ── image graphics (monster icon = species only; banner = any entry) ──
   if (pname.startsWith('/api/node/') && pname.endsWith('/image')) {
     const id = decodeURIComponent(pname.slice('/api/node/'.length, -'/image'.length));
-    if (!nodeMap[id]) { sendJSON(res, 404, { error: `Node not found: ${id}` }); return; }
+    const node = nodeMap[id];
+    if (!node) { sendJSON(res, 404, { error: `Node not found: ${id}` }); return; }
+    const kind = (url.searchParams.get('kind') === 'banner') ? 'banner' : 'monster';
 
     if (method === 'POST') {
       const body = await readJSON(req, res);
       if (!body) return;
+      const reqKind = (body.kind === 'banner') ? 'banner' : kind;
+      if (reqKind === 'monster' && node.r !== 'Species') {
+        sendJSON(res, 400, { error: 'Monster image graphics are only allowed on Species-rank entries' });
+        return;
+      }
       let ext = String(body.ext || (body.filename || '').split('.').pop() || '').toLowerCase();
-      if (ext === 'jpeg') ext = 'jpeg';
       if (!IMAGE_EXT.has(ext)) { sendJSON(res, 400, { error: `Unsupported image type: ${ext}` }); return; }
 
-      const b64 = String(body.data || '').replace(/^data:[^,]*,/, ''); // tolerate data URLs
+      const b64 = String(body.data || '').replace(/^data:[^,]*,/, '');
       let buf;
       try { buf = Buffer.from(b64, 'base64'); } catch { sendJSON(res, 400, { error: 'Bad base64' }); return; }
       if (!buf.length) { sendJSON(res, 400, { error: 'Empty image' }); return; }
       if (buf.length > MAX_IMAGE_BYTES) { sendJSON(res, 413, { error: 'Image exceeds size limit' }); return; }
 
       fs.mkdirSync(MEDIA_DIR, { recursive: true });
-      deleteImage(id); // replace any existing image (whatever its extension)
-      fs.writeFileSync(imagePath(id, ext), buf);
-      console.log(`[clad0] IMAGE saved for ${id} (.${ext}, ${buf.length} bytes)`);
-      sendJSON(res, 200, { ok: true, id, img: ext, bytes: buf.length });
+      deleteImage(id, reqKind); // overwrite any existing image of this kind (stable id)
+      fs.writeFileSync(imagePath(id, reqKind, ext), buf);
+      const dims = imageSize(buf, ext);
+      const warn = reqKind === 'banner' && (!dims || dims.w !== BANNER_IDEAL_WIDTH);
+      console.log(`[clad0] IMAGE(${reqKind}) saved for ${id} (.${ext}, ${buf.length} bytes${dims ? `, ${dims.w}x${dims.h}` : ''})`);
+      sendJSON(res, 200, {
+        ok: true, id, kind: reqKind, ext, bytes: buf.length,
+        w: dims ? dims.w : null, h: dims ? dims.h : null, warn,
+      });
       return;
     }
     if (method === 'DELETE') {
-      deleteImage(id);
-      console.log(`[clad0] IMAGE removed for ${id}`);
-      sendJSON(res, 200, { ok: true, id, img: null });
+      deleteImage(id, kind);
+      console.log(`[clad0] IMAGE(${kind}) removed for ${id}`);
+      sendJSON(res, 200, { ok: true, id, kind });
       return;
     }
     sendJSON(res, 405, { error: 'Use POST or DELETE for /image' });
@@ -690,7 +766,7 @@ const server = http.createServer(async (req, res) => {
     const goneIds = collectIds(removed);
     removeFromIndex(removed);
     saveData();
-    for (const gid of goneIds) { deleteDetail(gid); deleteStats(gid); deleteImage(gid); }  // clean up attachments
+    for (const gid of goneIds) { deleteDetail(gid); deleteStats(gid); deleteImage(gid, 'monster'); deleteImage(gid, 'banner'); }  // clean up attachments
 
     console.log(`[clad0] DELETE node ${id} (+${goneIds.length - 1} descendants)`);
     sendJSON(res, 200, { ok: true, id, parentId: loc.parent.id });
