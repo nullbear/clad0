@@ -758,3 +758,61 @@ body{
 .trow.drop-after{  box-shadow: inset 0 -2px 0 0 #8a6a2a; }
 
 #entry-sort-btn[disabled]{ opacity: .4; cursor: default; }
+
+/* ── tree indicators: chunk state, attachments, prose size ──────────────── */
+.tind-marks{ display:inline-flex; gap:3px; align-items:center; margin-left:6px; font-size:10px; line-height:1; }
+.tmark{ opacity:.8; }
+.tmark-stats{ color:#5a4a14; }
+.tmark-img{ color:#2e5a2a; }
+.tmark-chunk.is-chunked{ color:#8a6a2a; opacity:.85; }
+.tmark-chunk.not-chunked{ color:#b9a98a; opacity:.6; }
+.tsize{
+  margin-left:auto; padding-left:8px;
+  font-size:11px; color:#5b4630; opacity:.8;
+  font-variant: small-caps; font-variant-numeric:tabular-nums; white-space:nowrap;
+}
+.tlbl{ display:flex; align-items:center; width:100%; }
+
+/* ── job / planning marker classes (applied via the "Marker classes" field) ─
+   Add your own freely; these are sensible defaults. They tint the tree row
+   and show as a chip on the entry. */
+.trow.mk-rework{ background:rgba(150,30,30,.14); }
+.trow.mk-todo{   background:rgba(170,120,20,.14); }
+.trow.mk-review{ background:rgba(40,90,140,.13); }
+.trow.mk-done{   background:rgba(40,110,60,.12); }
+.trow.mk-stub{   background:rgba(120,120,120,.12); }
+
+#entry-body-inner.mk-rework{ box-shadow:inset 4px 0 0 #961e1e; padding-left:14px; }
+#entry-body-inner.mk-todo{   box-shadow:inset 4px 0 0 #aa7814; padding-left:14px; }
+#entry-body-inner.mk-review{ box-shadow:inset 4px 0 0 #285a8c; padding-left:14px; }
+#entry-body-inner.mk-done{   box-shadow:inset 4px 0 0 #286e3c; padding-left:14px; }
+
+.ebadge.marker{ background:#efe6d2; color:#5a4a20; border:1px solid #cbb88c; }
+.ebadge.marker.mk-rework{ background:#f3dada; color:#7a1c1c; border-color:#d8a9a9; }
+.ebadge.marker.mk-todo{   background:#f4ead0; color:#7a5a14; border-color:#d8c79a; }
+.ebadge.marker.mk-review{ background:#dde7f2; color:#1a4a7a; border-color:#a9c2d8; }
+.ebadge.marker.mk-done{   background:#dcecdf; color:#1a5a32; border-color:#a9d0b6; }
+
+/* ── entry image graphic ────────────────────────────────────────────────── */
+.e-image{ margin:14px 0; text-align:center; }
+.e-image img{
+  max-width:100%; max-height:420px; border:1px solid #cbb88c;
+  background:#fbf7ee; padding:6px; box-shadow:0 1px 4px rgba(0,0,0,.12);
+}
+
+/* ── monster stat sheet ─────────────────────────────────────────────────── */
+.statsheet .statsheet-body{
+  font-family:'EB Garamond',Georgia,serif; font-size:14px; line-height:1.5;
+  background:#fbf7ee; border:1px solid #d8c79a; border-left:4px solid #5a4a14;
+  padding:10px 14px; white-space:normal;
+}
+.statsheet .statsheet-body strong{ color:#5a4a14; }
+
+/* ── attachment editor (stat sheet + image) ─────────────────────────────── */
+.edit-attach{ border-top:1px dashed #cbb88c; margin-top:10px; padding-top:10px; }
+.edit-attach textarea{ font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; }
+.edit-image-row{ flex-direction:column; align-items:stretch; }
+.edit-image-box{ display:flex; gap:12px; align-items:flex-start; }
+#edit-image-preview{ max-width:140px; max-height:140px; border:1px solid #cbb88c; background:#fbf7ee; padding:4px; }
+.edit-image-controls{ display:flex; flex-direction:column; gap:6px; }
+#edit-image-status{ font-size:11px; color:#7a6a40; }

@@ -40,7 +40,12 @@ const path = require('path');
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const DATA_FILE = path.join(__dirname, 'data', 'clado.json');
 const PROSE_DIR = path.join(__dirname, 'data', 'prose');
+const STATS_DIR = path.join(__dirname, 'data', 'stats');   // monster stat sheets (per id)
+const MEDIA_DIR = path.join(__dirname, 'data', 'media');   // image graphics (per id)
 const PUBLIC = path.join(__dirname, 'public');
+
+const MAX_IMAGE_BYTES = 12 * 1024 * 1024; // 12 MB cap on uploaded image graphics
+const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg']);
 
 let ROOT = null;
 let nodeMap = {};
@@ -77,7 +82,7 @@ const PROSE_KEYS = new Set([
   'n', 'r', 'sn', 'g', 'summary', 'tax', 'ap', 'eco', 'ecology', 'beh', 'behavior',
   'traitsText', 'traits', 'abilities', 'abil', 'bg', 'background',
   'note', 'conv', 't', 'gorge', 'ctx', 'fossil', 'theorized', 'curse', 'tag',
-  'rankMismatch', 'expectedRank', 'hierarchicalRankPosition', '_kg',
+  'rankMismatch', 'expectedRank', 'hierarchicalRankPosition', 'css', '_kg',
 ]);
 
 // The subset of those that carry the data *bulk*. These live in per-node detail
@@ -114,6 +119,83 @@ function deleteDetail(id) {
   try { fs.unlinkSync(detailPath(id)); } catch { /* nothing to remove */ }
 }
 
+/* ── ATTACHMENTS: stat sheets + image graphics ────────────────────────────── */
+
+function statsPath(id) {
+  return path.join(STATS_DIR, encodeURIComponent(String(id)) + '.json');
+}
+
+function hasStats(id) {
+  try { return fs.existsSync(statsPath(id)); } catch { return false; }
+}
+
+function readStats(id) {
+  try { return JSON.parse(fs.readFileSync(statsPath(id), 'utf8')); }
+  catch { return null; }
+}
+
+function writeStats(id, obj) {
+  fs.mkdirSync(STATS_DIR, { recursive: true });
+  const p = statsPath(id);
+  const tmp = p + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(obj), 'utf8');
+  fs.renameSync(tmp, p);
+}
+
+function deleteStats(id) {
+  try { fs.unlinkSync(statsPath(id)); } catch { /* nothing to remove */ }
+}
+
+// An id's image is stored as MEDIA_DIR/<id>.<ext>. Returns the extension, or null.
+function imageExt(id) {
+  for (const ext of IMAGE_EXT) {
+    if (fs.existsSync(path.join(MEDIA_DIR, encodeURIComponent(String(id)) + '.' + ext))) return ext;
+  }
+  return null;
+}
+
+function imagePath(id, ext) {
+  return path.join(MEDIA_DIR, encodeURIComponent(String(id)) + '.' + ext);
+}
+
+function deleteImage(id) {
+  for (const ext of IMAGE_EXT) {
+    try { fs.unlinkSync(imagePath(id, ext)); } catch { /* ignore */ }
+  }
+}
+
+// Build the lightweight indicator map the tree uses: which nodes have chunked
+// prose (+ its byte size), a stat sheet, and/or an image. Derived purely from
+// the filesystem so there are no stored flags to drift out of sync.
+function buildMeta() {
+  const out = {};
+  const bump = (id, patch) => { (out[id] || (out[id] = {})); Object.assign(out[id], patch); };
+
+  const ids = base => {
+    try { return fs.readdirSync(base); } catch { return []; }
+  };
+
+  for (const f of ids(PROSE_DIR)) {
+    if (!f.endsWith('.json')) continue;
+    const id = decodeURIComponent(f.slice(0, -5));
+    let bytes = 0;
+    try { bytes = fs.statSync(path.join(PROSE_DIR, f)).size; } catch {}
+    bump(id, { chunked: true, bytes });
+  }
+  for (const f of ids(STATS_DIR)) {
+    if (!f.endsWith('.json')) continue;
+    bump(decodeURIComponent(f.slice(0, -5)), { stats: true });
+  }
+  for (const f of ids(MEDIA_DIR)) {
+    const dot = f.lastIndexOf('.');
+    if (dot < 0) continue;
+    const ext = f.slice(dot + 1).toLowerCase();
+    if (!IMAGE_EXT.has(ext)) continue;
+    bump(decodeURIComponent(f.slice(0, dot)), { img: ext });
+  }
+  return out;
+}
+
 // Pull any DETAIL_KEYS currently sitting inline on a tree node (legacy state).
 function inlineDetail(node) {
   const out = {};
@@ -137,6 +219,9 @@ function assembleNode(node) {
     out[k] = v;
   }
   if (hasDetail(node.id)) Object.assign(out, readDetail(node.id));
+  const ext = imageExt(node.id);
+  if (ext) out.img = ext;            // image graphic present (filesystem-derived)
+  if (hasStats(node.id)) out.hasStats = true;
   return out;
 }
 
@@ -219,6 +304,12 @@ const MIME = {
   '.css': 'text/css; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
 };
 
 function send(res, status, contentType, body) {
@@ -257,6 +348,19 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const method = req.method.toUpperCase();
   const pname = url.pathname;
+
+  if (method === 'GET' && pname.startsWith('/media/')) {
+    const file = decodeURIComponent(pname.slice('/media/'.length)).replace(/\.\./g, '');
+    const filepath = path.join(MEDIA_DIR, file);
+    const ext = path.extname(filepath);
+    try {
+      const content = fs.readFileSync(filepath);
+      send(res, 200, MIME[ext] || 'application/octet-stream', content);
+    } catch {
+      send(res, 404, 'text/plain; charset=utf-8', `Not found: ${file}`);
+    }
+    return;
+  }
 
   if (method === 'GET' && !pname.startsWith('/api/')) {
     const target = pname === '/' ? '/index.html' : pname;
@@ -407,6 +511,76 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (method === 'GET' && pname === '/api/meta') {
+    sendJSON(res, 200, buildMeta());
+    return;
+  }
+
+  // ── stat sheets ──
+  if (pname.startsWith('/api/node/') && pname.endsWith('/stats')) {
+    const id = decodeURIComponent(pname.slice('/api/node/'.length, -'/stats'.length));
+    if (!nodeMap[id]) { sendJSON(res, 404, { error: `Node not found: ${id}` }); return; }
+
+    if (method === 'GET') {
+      sendJSON(res, 200, { id, stats: readStats(id) });
+      return;
+    }
+    if (method === 'PUT') {
+      const body = await readJSON(req, res);
+      if (!body) return;
+      const stats = body.stats;
+      // Empty / null clears the sheet (and its indicator); anything else is stored verbatim.
+      if (stats == null || (typeof stats === 'string' && stats.trim() === '') ||
+          (typeof stats === 'object' && Object.keys(stats).length === 0)) {
+        deleteStats(id);
+        console.log(`[clad0] STATS cleared for ${id}`);
+        sendJSON(res, 200, { ok: true, id, hasStats: false });
+      } else {
+        writeStats(id, stats);
+        console.log(`[clad0] STATS saved for ${id}`);
+        sendJSON(res, 200, { ok: true, id, hasStats: true });
+      }
+      return;
+    }
+    sendJSON(res, 405, { error: 'Use GET or PUT for /stats' });
+    return;
+  }
+
+  // ── image graphics ──
+  if (pname.startsWith('/api/node/') && pname.endsWith('/image')) {
+    const id = decodeURIComponent(pname.slice('/api/node/'.length, -'/image'.length));
+    if (!nodeMap[id]) { sendJSON(res, 404, { error: `Node not found: ${id}` }); return; }
+
+    if (method === 'POST') {
+      const body = await readJSON(req, res);
+      if (!body) return;
+      let ext = String(body.ext || (body.filename || '').split('.').pop() || '').toLowerCase();
+      if (ext === 'jpeg') ext = 'jpeg';
+      if (!IMAGE_EXT.has(ext)) { sendJSON(res, 400, { error: `Unsupported image type: ${ext}` }); return; }
+
+      const b64 = String(body.data || '').replace(/^data:[^,]*,/, ''); // tolerate data URLs
+      let buf;
+      try { buf = Buffer.from(b64, 'base64'); } catch { sendJSON(res, 400, { error: 'Bad base64' }); return; }
+      if (!buf.length) { sendJSON(res, 400, { error: 'Empty image' }); return; }
+      if (buf.length > MAX_IMAGE_BYTES) { sendJSON(res, 413, { error: 'Image exceeds size limit' }); return; }
+
+      fs.mkdirSync(MEDIA_DIR, { recursive: true });
+      deleteImage(id); // replace any existing image (whatever its extension)
+      fs.writeFileSync(imagePath(id, ext), buf);
+      console.log(`[clad0] IMAGE saved for ${id} (.${ext}, ${buf.length} bytes)`);
+      sendJSON(res, 200, { ok: true, id, img: ext, bytes: buf.length });
+      return;
+    }
+    if (method === 'DELETE') {
+      deleteImage(id);
+      console.log(`[clad0] IMAGE removed for ${id}`);
+      sendJSON(res, 200, { ok: true, id, img: null });
+      return;
+    }
+    sendJSON(res, 405, { error: 'Use POST or DELETE for /image' });
+    return;
+  }
+
   if (method === 'GET' && pname.startsWith('/api/node/')) {
     const id = decodeURIComponent(pname.slice('/api/node/'.length));
     const node = nodeMap[id];
@@ -516,7 +690,7 @@ const server = http.createServer(async (req, res) => {
     const goneIds = collectIds(removed);
     removeFromIndex(removed);
     saveData();
-    for (const gid of goneIds) deleteDetail(gid);   // clean up orphaned prose
+    for (const gid of goneIds) { deleteDetail(gid); deleteStats(gid); deleteImage(gid); }  // clean up attachments
 
     console.log(`[clad0] DELETE node ${id} (+${goneIds.length - 1} descendants)`);
     sendJSON(res, 200, { ok: true, id, parentId: loc.parent.id });
@@ -532,6 +706,8 @@ server.listen(PORT, () => {
   console.log(`[clad0] server running → http://localhost:${PORT}`);
   console.log(`[clad0] data file: ${DATA_FILE}`);
   console.log(`[clad0] prose dir: ${PROSE_DIR}`);
+  console.log(`[clad0] stats dir: ${STATS_DIR}`);
+  console.log(`[clad0] media dir: ${MEDIA_DIR}`);
   console.log(`[clad0] public dir: ${PUBLIC}`);
 });
 

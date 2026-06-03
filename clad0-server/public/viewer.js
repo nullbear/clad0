@@ -45,6 +45,36 @@ let ROOT=null,sel=null,nodeMap={},kgColor={};
 let sG=true,sC=true,sT=true,sCu=true,searchQ="";
 let expanded=new Set(),pgLeft=1,pgRight=2;
 let dragId=null;
+let META={}; // id -> { chunked, bytes, stats, img } (filesystem-derived indicators)
+
+// Mirror of the server's DETAIL_KEYS, for estimating prose size of un-chunked nodes.
+const CLIENT_DETAIL_KEYS=['summary','tax','ap','eco','ecology','beh','behavior',
+  'traitsText','traits','abilities','abil','bg','background','g','note'];
+
+function fmtBytes(b){
+  if(!b) return '';
+  if(b<1024) return b+'b';
+  if(b<1024*1024) return Math.round(b/1024)+'kb';
+  return (b/1048576).toFixed(1)+'mb';
+}
+
+// Best-effort prose size for a node: the chunked file size if known, else the
+// JSON length of any prose still inline on the tree node (legacy/un-chunked).
+function proseBytes(n){
+  const m=META[n.id];
+  if(m&&m.chunked) return m.bytes||0;
+  let b=0;
+  for(const k of CLIENT_DETAIL_KEYS){ if(k in n && n[k]!=null) b+=JSON.stringify(n[k]).length; }
+  return b;
+}
+function isChunked(n){ const m=META[n.id]; return !!(m&&m.chunked); }
+
+function cssEscape(s){ return (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s).replace(/["\\\]]/g,'\\$&'); }
+
+async function loadMeta(){
+  try{ const r=await fetch('/api/meta'); if(r.ok) META=await r.json(); }
+  catch(e){ /* indicators degrade to inline estimates */ }
+}
 
 const RANK_ORDER=['Domain','Kingdom','Phylum','Class','Order','Family','Genus','Species','Subspecies'];
 function rankIndex(r){const i=RANK_ORDER.indexOf(r);return i===-1?RANK_ORDER.length:i;}
@@ -94,7 +124,7 @@ function buildNode(n,depth){
   if(!anyVis(n)) return null;
   const wrap=document.createElement('div');
   const row=document.createElement('div');
-  row.className='trow'+(n.rankMismatch?' rank-mismatch':'');row.dataset.id=n.id;
+  row.className='trow'+(n.rankMismatch?' rank-mismatch':'')+(n.css?(' '+n.css):'');row.dataset.id=n.id;
 
   for(let i=0;i<depth;i++){
     const d=document.createElement('div');d.className='tind';row.appendChild(d);
@@ -133,6 +163,23 @@ function buildNode(n,depth){
   if(n.curse){const d=document.createElement('div');d.className='tdot';d.style.background='#8b3a6a';d.title='Curse/transformation';dots.appendChild(d);}
   if(n.conv){const d=document.createElement('div');d.className='tdot';d.style.background='#2a6a8a';d.title='Convergent morphology';dots.appendChild(d);}
   lbl.appendChild(dots);
+
+  // attachment / chunk indicators
+  const ind=document.createElement('div');ind.className='tind-marks';
+  const m=META[n.id]||{};
+  if(m.stats){const s=document.createElement('span');s.className='tmark tmark-stats';s.textContent='▤';s.title='Has monster stat sheet';ind.appendChild(s);}
+  if(m.img){const im=document.createElement('span');im.className='tmark tmark-img';im.textContent='◳';im.title='Has image graphic';ind.appendChild(im);}
+  const chunk=document.createElement('span');
+  chunk.className='tmark tmark-chunk '+(isChunked(n)?'is-chunked':'not-chunked');
+  chunk.textContent=isChunked(n)?'◆':'◇';
+  chunk.title=isChunked(n)?'Prose chunked to its own file':'Prose not yet chunked (inline)';
+  ind.appendChild(chunk);
+  lbl.appendChild(ind);
+
+  // faded prose size, right-aligned
+  const sz=proseBytes(n);
+  if(sz){const z=document.createElement('span');z.className='tsize';z.textContent=fmtBytes(sz);lbl.appendChild(z);}
+
   row.appendChild(lbl);
 
   const cw=document.createElement('div');
@@ -357,7 +404,7 @@ function renderDetail(n){
   const rp=document.getElementById('right-page');
   rp.classList.remove('flip'); void rp.offsetWidth; rp.classList.add('flip');
 
-  let html='<div id="entry-body-inner">';
+  let html='<div id="entry-body-inner"'+(n.css?(' class="'+escHtml(n.css)+'"'):'')+'>';
   if(n._path&&n._path.length){
     const bc=n._path.map(p=>'<span class="pa" onclick="jumpTo(\''+jsArg(p.id)+'\')">'+p.n+'</span>').join(' › ');
     html+='<div class="e-path">'+bc+' › <strong style="color:#1a1208">'+n.n+'</strong></div>';
@@ -371,7 +418,15 @@ function renderDetail(n){
   if(n.curse) badges+='<span class="ebadge curse">☠ Curse or transformation vector</span>';
   if(n.rankMismatch) badges+='<span class="ebadge curse"><span class="rank-mismatch-bang">!</span> Rank/position mismatch: expected '+escHtml(n.expectedRank||'next rank')+', marked '+escHtml(rk||'unranked')+'</span>';
   if(n.conv) badges+='<span class="ebadge conv">⚡ Convergent morphology</span>';
+  if(n.css){ String(n.css).trim().split(/\s+/).forEach(c=>{ if(c) badges+='<span class="ebadge marker '+escHtml(c)+'">⚑ '+escHtml(c)+'</span>'; }); }
   if(badges) html+='<div class="badge-row">'+badges+'</div>';
+
+  if(n.img){
+    html+='<div class="e-image"><img src="/media/'+encodeURIComponent(n.id)+'.'+escHtml(n.img)+'" alt="'+escHtml(n.n||'')+'"></div>';
+  }
+  if(n.hasStats){
+    html+='<div class="e-section statsheet" id="statsheet-block"><div class="e-head">Monster Stat Sheet</div><div class="statsheet-body" id="statsheet-body">Loading…</div></div>';
+  }
 
   const guideEntry = (n.tag==='Reference'||n.tag==='Catalogue');
   if(guideEntry){
@@ -416,6 +471,20 @@ function renderDetail(n){
   const body=scroll.querySelector('.entry-body');
   body.innerHTML=html;
   scroll.scrollTop=0;
+
+  if(n.hasStats){
+    fetch('/api/node/'+encodeURIComponent(n.id)+'/stats')
+      .then(r=>r.ok?r.json():null)
+      .then(d=>{
+        const el=document.getElementById('statsheet-body');
+        if(!el) return;
+        const s=d&&d.stats;
+        if(s==null){ el.textContent='(empty)'; return; }
+        const text=(typeof s==='string')?s:JSON.stringify(s,null,2);
+        el.innerHTML=renderAbilitiesMarkdown(text); // escapes, supports **bold** + line breaks
+      })
+      .catch(()=>{ const el=document.getElementById('statsheet-body'); if(el) el.textContent='(failed to load stat sheet)'; });
+  }
 }
 
 function jumpTo(id){
@@ -527,7 +596,11 @@ const EDIT_FIELDS = [
   ['ctx', 'Context entry', 'checkbox'],
   ['theorized', 'Theorized', 'checkbox'],
   ['fossil', 'Fossil / extinct', 'checkbox'],
-  ['curse', 'Curse vector', 'checkbox']
+  ['curse', 'Curse vector', 'checkbox'],
+  ['tag', 'Reference tag (e.g. Reference / Catalogue)', 'text'],
+  ['rankMismatch', 'Rank-position mismatch flag', 'checkbox'],
+  ['expectedRank', 'Expected rank (if mismatched)', 'text'],
+  ['css', 'Marker classes (e.g. mk-rework mk-todo)', 'text']
 ];
 
 function ensureEditorUI() {
@@ -542,6 +615,23 @@ function ensureEditorUI() {
         <button id="edit-close" type="button">×</button>
       </div>
       <form id="edit-form"></form>
+      <div class="edit-attach">
+        <label class="edit-row">
+          <span>Monster stat sheet</span>
+          <textarea id="edit-stats" rows="6" placeholder="Stat block — markdown or plain text. Empty clears the sheet."></textarea>
+        </label>
+        <div class="edit-row edit-image-row">
+          <span>Image graphic</span>
+          <div class="edit-image-box">
+            <img id="edit-image-preview" alt="" />
+            <div class="edit-image-controls">
+              <input id="edit-image-file" type="file" accept="image/*" />
+              <button id="edit-image-remove" type="button">Remove image</button>
+              <span id="edit-image-status"></span>
+            </div>
+          </div>
+        </div>
+      </div>
       <div class="edit-actions">
         <button id="edit-save" type="button">Save to disk</button>
         <button id="edit-cancel" type="button">Cancel</button>
@@ -554,6 +644,77 @@ function ensureEditorUI() {
   document.getElementById('edit-close').onclick = closeEditor;
   document.getElementById('edit-cancel').onclick = closeEditor;
   document.getElementById('edit-save').onclick = saveEditor;
+  document.getElementById('edit-image-file').onchange = onImageChosen;
+  document.getElementById('edit-image-remove').onclick = onImageRemove;
+}
+
+function refreshImagePreview() {
+  const img = document.getElementById('edit-image-preview');
+  const removeBtn = document.getElementById('edit-image-remove');
+  if (!img) return;
+  if (sel && sel.img) {
+    img.src = '/media/' + encodeURIComponent(sel.id) + '.' + sel.img + '?t=' + Date.now();
+    img.style.display = '';
+    if (removeBtn) removeBtn.disabled = false;
+  } else {
+    img.removeAttribute('src');
+    img.style.display = 'none';
+    if (removeBtn) removeBtn.disabled = true;
+  }
+}
+
+async function onImageChosen(e) {
+  const file = e.target.files && e.target.files[0];
+  if (!file || !sel) return;
+  const status = document.getElementById('edit-image-status');
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  status.textContent = 'Uploading…';
+  try {
+    const dataUrl = await new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(fr.result);
+      fr.onerror = () => rej(new Error('read failed'));
+      fr.readAsDataURL(file);
+    });
+    const r = await fetch('/api/node/' + encodeURIComponent(sel.id) + '/image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ext, filename: file.name, data: dataUrl })
+    });
+    const d = await r.json();
+    if (!r.ok) { status.textContent = d.error || 'Upload failed'; return; }
+    sel.img = d.img;
+    status.textContent = 'Image saved.';
+    refreshImagePreview();
+    await loadMeta(); rerenderTree(); restoreSelectionRow();
+  } catch (err) {
+    status.textContent = 'Upload failed: ' + err.message;
+  } finally {
+    e.target.value = '';
+  }
+}
+
+async function onImageRemove() {
+  if (!sel || !sel.img) return;
+  const status = document.getElementById('edit-image-status');
+  status.textContent = 'Removing…';
+  try {
+    const r = await fetch('/api/node/' + encodeURIComponent(sel.id) + '/image', { method: 'DELETE' });
+    const d = await r.json();
+    if (!r.ok) { status.textContent = d.error || 'Remove failed'; return; }
+    sel.img = null;
+    status.textContent = 'Image removed.';
+    refreshImagePreview();
+    await loadMeta(); rerenderTree(); restoreSelectionRow();
+  } catch (err) {
+    status.textContent = 'Remove failed: ' + err.message;
+  }
+}
+
+function restoreSelectionRow() {
+  if (!sel) return;
+  const row = document.querySelector('.trow[data-id="' + cssEscape(sel.id) + '"]');
+  if (row) row.classList.add('sel');
 }
 
 async function openEditor() {
@@ -593,6 +754,23 @@ async function openEditor() {
   }
 
   document.getElementById('edit-status').textContent = '';
+
+  // load attachments for this entry
+  const statsEl = document.getElementById('edit-stats');
+  statsEl.value = '';
+  statsEl.dataset.original = '';
+  fetch('/api/node/' + encodeURIComponent(sel.id) + '/stats')
+    .then(r => r.ok ? r.json() : null)
+    .then(d => {
+      const s = d && d.stats;
+      const text = (s == null) ? '' : (typeof s === 'string' ? s : JSON.stringify(s, null, 2));
+      statsEl.value = text;
+      statsEl.dataset.original = text;
+    })
+    .catch(() => {});
+  document.getElementById('edit-image-status').textContent = '';
+  refreshImagePreview();
+
   document.getElementById('edit-panel').classList.add('open');
 }
 
@@ -634,11 +812,27 @@ async function saveEditor() {
     return;
   }
 
+  // Persist the monster stat sheet if it changed (empty clears it).
+  const statsEl = document.getElementById('edit-stats');
+  if (statsEl && statsEl.value !== (statsEl.dataset.original || '')) {
+    const sres = await fetch('/api/node/' + encodeURIComponent(sel.id) + '/stats', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stats: statsEl.value })
+    });
+    if (sres.ok) {
+      const sd = await sres.json();
+      sel.hasStats = !!sd.hasStats;
+      statsEl.dataset.original = statsEl.value;
+    }
+  }
+
   Object.assign(sel, payload);
 
   // Re-index because name/rank/status fields may affect search, labels, colors, etc.
   nodeMap = {};
   kgColor = {};
+  await loadMeta();
   indexTree(ROOT, null, []);
 
   rerenderTree();
@@ -773,6 +967,7 @@ async function reloadTreeAndSelect(idToSelect) {
   ROOT = data;
   nodeMap = {};
   kgColor = {};
+  await loadMeta();
   indexTree(ROOT, null, []);
 
   if (idToSelect && nodeMap[idToSelect]) {
@@ -1148,7 +1343,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!r.ok) throw new Error('Failed to load clado: ' + r.status);
       return r.json();
     })
-    .then(data => init(data))
+    .then(async data => { await loadMeta(); init(data); })
     .catch(err => {
       document.body.innerHTML =
         '<div style="padding:2rem;color:#c00;font-family:monospace">' +
