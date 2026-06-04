@@ -18,29 +18,6 @@ const KC={Fiends:"#7a1c1c",Celestials:"#3a5e8a",Fey:"#4e2e6e",
   Constructs:"#1a4840","Transformation Category":"#3e1a40",
   Undead:"#3e1a40","Primordial Vestige":"#18183a"};
 
-const TABS=[
-  {label:"Rules", id:"default-entry-rules", abbr:"RULE"},
-  {label:"Grading", id:"ref-entry-quality-grading", abbr:"GRD"},
-  {label:"Transformations", id:"mutagenic-transformations", abbr:"TRN"},
-  {label:"All Taxa",  id:null,          abbr:"ALL"},
-  {label:"Fiends",    id:"k-fiends",    abbr:"FND"},
-  {label:"Celestials",id:"k-celestials",abbr:"CEL"},
-  {label:"Fey",       id:"k-fey",       abbr:"FEY"},
-  {label:"Elementals",id:"k-elementals",abbr:"ELM"},
-  {label:"Unlife",    id:"k-unlife",    abbr:"UNL"},
-  {label:"Plants",    id:"k-plants",    abbr:"PLT"},
-  {label:"Fungi",     id:"k-fungi",     abbr:"FNG"},
-  {label:"Beasts",    id:"k-beasts",    abbr:"BST"},
-  {label:"Monstrosities", id:"k-monst", abbr:"MON"},
-  {label:"Far Realm", id:"far-realm-outside-existence",   abbr:"FAR"},
-  {label:"Humanoids", id:"k-humanoids", abbr:"HUM"},
-  {label:"Giants",    id:"k-giants",    abbr:"GNT"},
-  {label:"Dragons",   id:"k-dragons",   abbr:"DRG"},
-  {label:"Constructs",id:"k-constructs",abbr:"CON"},
-  {label:"Undead",    id:"ud-undead-section",abbr:"UND"},
-  {label:"The Nadir", id:"nadir-presence",   abbr:"NDR"},
-];
-
 let ROOT=null,sel=null,nodeMap={},kgColor={};
 let sG=true,sC=true,sT=true,sCu=true,searchQ="";
 let expanded=new Set(),pgLeft=1,pgRight=2;
@@ -52,6 +29,11 @@ const PROSE_STUB_MAX=15*1024;
 const PROSE_HEAVY_MIN=45*1024;
 function proseBand(b){ if(!b) return 'empty'; if(b<PROSE_STUB_MAX) return 'stub'; if(b>PROSE_HEAVY_MIN) return 'heavy'; return 'ok'; }
 const BANNER_IDEAL_WIDTH=1442;
+
+// Automatic staleness: an entry not revised within this window is flagged for
+// review, unless the author has set staleExempt. `revised` is stamped server-side.
+const STALE_MS=72*3600*1000; // 72 hours
+function isStale(n){ return !n.staleExempt && typeof n.revised==='number' && (Date.now()-n.revised > STALE_MS); }
 
 // Mirror of the server's DETAIL_KEYS, for estimating prose size of un-chunked nodes.
 const CLIENT_DETAIL_KEYS=['summary','tax','ap','eco','ecology','beh','behavior',
@@ -101,6 +83,13 @@ const DEIFIC_RANKS=['Pantheon','Major Deity','Deity','Minor Deity','Demigod',
 const ALL_RANKS=[...RANK_ORDER, ...DEIFIC_RANKS];
 function rankIndex(r){const i=ALL_RANKS.indexOf(r);return i===-1?ALL_RANKS.length:i;}
 function isDeific(r){ return DEIFIC_RANKS.indexOf(r)!==-1; }
+// Legal options for the rank dropdown; preserves any unusual existing value.
+function rankOptions(current){
+  const opts=[...RANK_ORDER, ...DEIFIC_RANKS];
+  if(current==null) current='';
+  if(opts.indexOf(current)===-1) opts.unshift(current);
+  return opts;
+}
 
 function indexTree(n,kg,path){
   const myKg=n.r==="Kingdom"?n.n:kg;
@@ -154,12 +143,10 @@ function buildNode(n,depth){
   if(!anyVis(n)) return null;
   const wrap=document.createElement('div');
   const row=document.createElement('div');
-  const _flags=parseFlags(n);
-  const _flagCls=_flags.map(f=>'flag-'+f.slug).join(' ');
   const _hasSheet=(META[n.id]&&META[n.id].stats);
-  row.className='trow'+(n.rankMismatch?' rank-mismatch':'')+(_flags.length?' has-flags':'')+(_hasSheet?' has-statsheet':'')+(_flagCls?(' '+_flagCls):'');
+  // Custom flags are intentionally NOT shown in the tree (kept for search only).
+  row.className='trow'+(n.rankMismatch?' rank-mismatch':'')+(_hasSheet?' has-statsheet':'')+(isStale(n)?' is-stale':'');
   row.dataset.id=n.id;
-  if(_flags.length) row.style.setProperty('--flag-hue', _flags[0].hue);
 
   for(let i=0;i<depth;i++){
     const d=document.createElement('div');d.className='tind';row.appendChild(d);
@@ -199,15 +186,11 @@ function buildNode(n,depth){
   if(n.conv){const d=document.createElement('div');d.className='tdot';d.style.background='#2a6a8a';d.title='Convergent morphology';dots.appendChild(d);}
   lbl.appendChild(dots);
 
-  // flag chips (each its own colour)
-  if(_flags.length){
-    const fc=document.createElement('div');fc.className='tflags';
-    _flags.forEach(f=>{
-      const c=document.createElement('span');c.className='tflag flag-'+f.slug;
-      c.style.setProperty('--fh',f.hue);c.textContent=f.label;c.title='Flag: '+f.label;
-      fc.appendChild(c);
-    });
-    lbl.appendChild(fc);
+  // automatic stale flag (system flag — shown in the tree; custom flags are not)
+  if(isStale(n)){
+    const st=document.createElement('span');st.className='tstale';st.textContent='stale';
+    st.title='No revision in 72h — due for revision';
+    lbl.appendChild(st);
   }
 
   // attachment / chunk indicators
@@ -378,8 +361,10 @@ const SB_SKILLS=[
 const SB_INLINE=[
   ['damageVuln','Damage Vulnerabilities'],['damageRes','Damage Resistances'],
   ['damageImm','Damage Immunities'],['condImm','Condition Immunities'],
-  ['senses','Senses'],['languages','Languages'],['equipment','Equipment']
+  ['senses','Senses'],['languages','Languages']
 ];
+// Unique-entity sections (rendered after the action groups).
+const SB_UNIQUE_LISTS=[['mythic','Mythic Actions'],['lair','Lair Actions'],['regional','Regional Effects']];
 const SB_SPELL_ABILITIES=['INT','WIS','CHA'];
 const CR_XP={ '0':10,'1/8':25,'1/4':50,'1/2':100,'1':200,'2':450,'3':700,'4':1100,'5':1800,'6':2300,
   '7':2900,'8':3900,'9':5000,'10':5900,'11':7200,'12':8400,'13':10000,'14':11500,'15':13000,'16':15000,
@@ -405,13 +390,35 @@ function profBonus(stats){
 // Accept an array, or a legacy comma-separated string, → array of strings.
 function asList(v){ if(Array.isArray(v)) return v.map(x=>String(x).trim()).filter(Boolean);
   if(v==null||v==='') return []; return String(v).split(/,\s*/).map(s=>s.trim()).filter(Boolean); }
+// Normalize a list to [{name,text}], tolerating legacy string entries.
+function nameTextList(v){
+  if(!Array.isArray(v)) return [];
+  return v.map(it=> typeof it==='string' ? {name:it,text:''} : {name:(it&&it.name)||'',text:(it&&it.text)||''})
+          .filter(it=> (it.name&&it.name.trim()) || (it.text&&it.text.trim()) );
+}
 function sbList(items){
-  if(!Array.isArray(items)||!items.length) return '';
-  return items.filter(it=>it&&(it.name||it.text)).map(it=>
-    '<div class="sb-entry"><span class="sb-entry-name">'+escHtml(it.name||'')+'.</span> '+
-    renderAbilitiesMarkdown(it.text||'')+'</div>').join('');
+  const list=nameTextList(items);
+  if(!list.length) return '';
+  return list.map(it=>{
+    const body=(it.text&&it.text.trim()) ? (' '+renderAbilitiesMarkdown(it.text)) : '';
+    return '<div class="sb-entry"><span class="sb-entry-name">'+escHtml(it.name||'')+(it.name?'.':'')+'</span>'+body+'</div>';
+  }).join('');
 }
 function sbProp(label, val){ return val?('<div class="sb-prop"><span class="sb-label">'+label+'</span> '+escHtml(val)+'</div>'):''; }
+
+// Equipment: compact inline list of bare names, or a full section when any
+// item carries a description (artifacts, signature gear of unique entities).
+function renderEquipment(s){
+  const eq=nameTextList(s.equipment);
+  if(!eq.length) return {inline:'', section:''};
+  const anyText=eq.some(it=>it.text&&it.text.trim());
+  if(!anyText) return {inline:sbProp('Equipment', eq.map(it=>it.name).join(', ')), section:''};
+  return {inline:'', section:'<div class="sb-section-head">Equipment</div>'+sbList(eq)};
+}
+function renderWealth(s){
+  if(!s.wealth||!String(s.wealth).trim()) return '';
+  return '<div class="sb-section-head">Wealth</div><div class="sb-entry">'+renderAbilitiesMarkdown(s.wealth)+'</div>';
+}
 
 function renderSpeeds(s){
   if(Array.isArray(s.speeds)&&s.speeds.length){
@@ -468,6 +475,7 @@ function renderStatblock(s){
   h+='</div>';
   const sub=[s.size,s.type].filter(Boolean).join(' ')+(s.alignment?(', '+s.alignment):'');
   if(sub.trim()) h+='<div class="sb-sub">'+escHtml(sub)+'</div>';
+  if(s.epithet&&s.epithet.trim()) h+='<div class="sb-epithet">'+escHtml(s.epithet)+'</div>';
   h+='<div class="sb-rule"></div>';
   if(s.ac) h+=sbProp('Armor Class', s.ac+(s.acNote?(' ('+s.acNote+')'):''));
   if(s.hpFormula||s.hp){ const avg=hpAverage(s.hpFormula); h+=sbProp('Hit Points',(avg!=null?avg:(s.hp||''))+(s.hpFormula?(' ('+s.hpFormula+')'):'')); }
@@ -483,11 +491,20 @@ function renderStatblock(s){
   const saves=renderSaves(s,pb); if(saves) h+=sbProp('Saving Throws', saves);
   const skills=renderSkills(s,pb); if(skills) h+=sbProp('Skills', skills);
   SB_INLINE.forEach(function(p){ const arr=asList(s[p[0]]); if(arr.length) h+=sbProp(p[1], arr.join(', ')); });
+  const equip=renderEquipment(s);
+  if(equip.inline) h+=equip.inline;       // bare-name gear sits with the other props
   h+=sbProp('Proficiency Bonus', fmtMod(pb));
+  // Wealth + rich (described) equipment as their own blocks
+  const wealth=renderWealth(s);
+  if(wealth||equip.section) h+='<div class="sb-rule"></div>'+wealth+equip.section;
   // Traits (incl. spellcasting), then the action groups
   const traitBody=sbList(s.traits)+renderSpellcasting(s,pb);
   if(traitBody) h+='<div class="sb-rule"></div>'+traitBody;
   [['actions','Actions'],['bonus','Bonus Actions'],['reactions','Reactions'],['legendary','Legendary Actions']].forEach(function(p){
+    const body=sbList(s[p[0]]); if(body){ h+='<div class="sb-section-head">'+p[1]+'</div>'+body; }
+  });
+  // Unique-entity sections: mythic actions, lair actions, regional effects
+  SB_UNIQUE_LISTS.forEach(function(p){
     const body=sbList(s[p[0]]); if(body){ h+='<div class="sb-section-head">'+p[1]+'</div>'+body; }
   });
   h+='</div>';
@@ -665,7 +682,7 @@ function renderDetail(n){
     html+=addSection('8. Background', sectionText(n,'background'));
   }
   if(n.conv) html+=addSection('Convergent Evolution', n.conv, '');
-  if(n.note) html+='<div class="e-section"><div class="e-head">Classification Notes</div><div class="e-note">'+n.note+'</div></div>';
+  if(n.note) html+='<div class="e-section"><div class="e-head">Classification Notes</div><div class="e-note">'+renderAbilitiesMarkdown(n.note)+'</div></div>';
   if(n.t&&n.t.length){
     html+='<div class="e-section"><div class="e-head">Trait Tags</div><div class="trait-row">';
     n.t.forEach(t=>html+='<span class="trait-tag">'+(TLABELS[t]||t)+'</span>');
@@ -713,38 +730,6 @@ function jumpTo(id){
   },60);
 }
 
-/* ── THUMBHOLE TABS ── */
-function buildTabs(){
-  const col=document.getElementById('tab-col');
-  col.innerHTML='';
-  TABS.forEach((tab,i)=>{
-    const el=document.createElement('div');
-    el.className='thumbtab';el.dataset.tabid=tab.id||'all';
-    el.title=tab.label;
-    const lbl=document.createElement('div');lbl.className='thumbtab-label';lbl.textContent=tab.abbr;
-    const tabNode=tab.id?nodeMap[tab.id]:null;
-    const color=tab.id==='default-entry-rules'?'#8a6a2a':(tabNode?(kgColor[tab.id]||KC[tabNode.n]||KC[tabNode._kg]):'#8a7040');
-    el.style.borderColor=color;
-    el.style.boxShadow='inset 9px 0 0 '+color+', inset 2px 0 5px rgba(255,255,255,.25), 0 1px 2px rgba(0,0,0,.15)';
-    el.appendChild(lbl);
-    el.addEventListener('click',()=>tabClick(tab,el));
-    col.appendChild(el);
-  });
-}
-
-function tabClick(tab,el){
-  document.querySelectorAll('.thumbtab').forEach(t=>t.classList.remove('active'));
-  el.classList.add('active');
-  if(!tab.id){rerenderTree();return;}
-  const n=nodeMap[tab.id];if(!n) return;
-  n._path.forEach(p=>expanded.add(p.id));expanded.add(tab.id);
-  rerenderTree();selectNode(n);
-  setTimeout(()=>{
-    const row=document.querySelector(`.trow[data-id="${tab.id}"]`);
-    if(row) row.scrollIntoView({block:'start',behavior:'smooth'});
-  },60);
-}
-
 /* ── TOGGLES ── */
 function tog(id,get,set){
   document.getElementById(id).addEventListener('click',function(){
@@ -789,7 +774,6 @@ function init(data){
   ROOT=data;indexTree(ROOT,null,[]);
   expanded.clear();
   expanded.add(ROOT.id); // start collapsed: show only the root's immediate children
-  buildTabs();
   rerenderTree();
   // welcome stats
   let total=0,gorge=0,refs=0,taxa=0;
@@ -803,7 +787,7 @@ function init(data){
 const EDIT_FIELDS = [
   ['n', 'Name', 'text'],
   ['sn', 'Scientific name', 'text'],
-  ['r', 'Rank', 'text'],
+  ['r', 'Rank', 'select'],
   ['summary', 'Summary', 'textarea'],
   ['tax', 'Taxonomic definition', 'textarea'],
   ['ap', 'Physical appearance', 'textarea'],
@@ -818,6 +802,7 @@ const EDIT_FIELDS = [
   ['theorized', 'Theorized', 'checkbox'],
   ['fossil', 'Fossil / extinct', 'checkbox'],
   ['curse', 'Curse vector', 'checkbox'],
+  ['staleExempt', 'Exempt from stale tracking', 'checkbox'],
   ['tag', 'Reference tag (e.g. Reference / Catalogue)', 'text'],
   ['rankMismatch', 'Rank-position mismatch flag', 'checkbox'],
   ['expectedRank', 'Expected rank (if mismatched)', 'text'],
@@ -911,12 +896,13 @@ function imageControl(kind, label){
 /* 5e stat-sheet form */
 const STAT_FIELDS=[
   ['name','Creature name','text'],['size','Size','select'],['type','Type','text'],['alignment','Alignment','text'],
+  ['epithet','Epithet / title (unique entities)','text'],
   ['ac','Armor Class','text'],['acNote','AC note','text'],
   ['hpFormula','Hit Point formula (e.g. 18d10+36)','text'],
   ['str','STR','num'],['dex','DEX','num'],['con','CON','num'],['int','INT','num'],['wis','WIS','num'],['cha','CHA','num'],
   ['cr','Challenge Rating','text'],['pb','Proficiency override (blank = from CR)','num']
 ];
-const STAT_LISTS=[['traits','Traits'],['actions','Actions'],['bonus','Bonus Actions'],['reactions','Reactions'],['legendary','Legendary Actions']];
+const STAT_LISTS=[['traits','Traits'],['actions','Actions'],['bonus','Bonus Actions'],['reactions','Reactions'],['legendary','Legendary Actions'],['mythic','Mythic Actions'],['lair','Lair Actions'],['regional','Regional Effects'],['equipment','Equipment & Artifacts']];
 
 function buildStatForm(container, stats){
   stats=stats||{};
@@ -1007,6 +993,13 @@ function buildStatForm(container, stats){
     container.appendChild(sec);
   });
 
+  // ── wealth (markdown) ──
+  const wSec=document.createElement('div'); wSec.className='stat-block';
+  const wRow=document.createElement('label'); wRow.className='edit-row';
+  const wT=document.createElement('span'); wT.textContent='Wealth — hoard, currency, holdings (markdown)';
+  const wTa=document.createElement('textarea'); wTa.rows=3; wTa.dataset.wealth='1'; wTa.dataset.md='1'; wTa.value=stats.wealth||'';
+  wRow.appendChild(wT); wRow.appendChild(wTa); wSec.appendChild(wRow); container.appendChild(wSec);
+
   // ── {name,text} lists: traits / actions / bonus / reactions / legendary ──
   STAT_LISTS.forEach(function(L){
     const key=L[0], label=L[1];
@@ -1016,12 +1009,14 @@ function buildStatForm(container, stats){
     head.appendChild(add); sec.appendChild(head);
     const items=document.createElement('div'); items.className='stat-items'; sec.appendChild(items);
     function addItem(it){
+      if(typeof it==='string') it={name:it,text:''};
       it=it||{};
       const r=document.createElement('div'); r.className='stat-item';
       const nm=document.createElement('input'); nm.type='text'; nm.placeholder='name'; nm.className='stat-item-name'; nm.value=it.name||'';
-      const tx=document.createElement('textarea'); tx.rows=2; tx.placeholder='text (supports **bold**)'; tx.className='stat-item-text'; tx.value=it.text||'';
+      const tx=document.createElement('textarea'); tx.rows=2; tx.placeholder='text (supports **bold**)'; tx.className='stat-item-text'; tx.dataset.mdLazy='1'; tx.value=it.text||'';
       const del=document.createElement('button'); del.type='button'; del.className='stat-del'; del.textContent='×'; del.onclick=function(){r.remove();};
       r.appendChild(nm); r.appendChild(tx); r.appendChild(del); items.appendChild(r);
+      bindLazyMd(tx);
     }
     (Array.isArray(stats[key])?stats[key]:[]).forEach(addItem); add.onclick=function(){addItem();};
     container.appendChild(sec);
@@ -1049,7 +1044,7 @@ function buildStatForm(container, stats){
   lRow.appendChild(lT); lRow.appendChild(lIn); spBody.appendChild(lRow);
 
   const nRow=document.createElement('label'); nRow.className='edit-row stat-f';
-  const nT=document.createElement('span'); nT.textContent='Intro override (optional)'; const nIn=document.createElement('textarea'); nIn.rows=2; nIn.dataset.spellNote='1'; nIn.value=sc.note||'';
+  const nT=document.createElement('span'); nT.textContent='Intro override (optional)'; const nIn=document.createElement('textarea'); nIn.rows=2; nIn.dataset.spellNote='1'; nIn.dataset.mdLazy='1'; nIn.value=sc.note||'';
   nRow.appendChild(nT); nRow.appendChild(nIn); spBody.appendChild(nRow);
 
   const spPrev=document.createElement('div'); spPrev.className='stat-derived'; spPrev.id='stat-spell-prev'; spBody.appendChild(spPrev);
@@ -1125,11 +1120,15 @@ function readStatForm(container){
   container.querySelectorAll('.stat-list').forEach(function(sec){
     const arr=[];
     sec.querySelectorAll('.stat-item').forEach(function(it){
-      const name=it.querySelector('.stat-item-name').value.trim(); const text=it.querySelector('.stat-item-text').value.trim();
+      const tx=it.querySelector('.stat-item-text');
+      const name=it.querySelector('.stat-item-name').value.trim();
+      const text=(tx&&tx._mde?tx._mde.value():tx.value).trim();
       if(name||text) arr.push({name:name,text:text});
     });
     if(arr.length) out[sec.dataset.listKey]=arr;
   });
+  const wTa=container.querySelector('[data-wealth]');
+  if(wTa){ const w=(wTa._mde?wTa._mde.value():wTa.value).trim(); if(w) out.wealth=w; }
   const tgl=container.querySelector('#edit-has-spells');
   if(tgl&&tgl.checked){
     const ab=container.querySelector('[data-spell-ability]'); const lv=container.querySelector('[data-spell-level]'); const nt=container.querySelector('[data-spell-note]');
@@ -1139,7 +1138,7 @@ function readStatForm(container){
       if(label||spells) slots.push({label:label,spells:spells});
     });
     out.hasSpells=true;
-    out.spellcasting={ ability: ab?ab.value:'INT', level: lv?lv.value.trim():'', note: nt?nt.value.trim():'', slots:slots };
+    out.spellcasting={ ability: ab?ab.value:'INT', level: lv?lv.value.trim():'', note: (nt?(nt._mde?nt._mde.value():nt.value).trim():''), slots:slots };
   }
   return Object.keys(out).length?out:null;
 }
@@ -1164,10 +1163,15 @@ async function openEditor() {
     let input;
     if (type === 'textarea') { input = document.createElement('textarea'); input.rows = 4; input.value = sel[key] || ''; input.dataset.md = '1'; }
     else if (type === 'checkbox') { input = document.createElement('input'); input.type = 'checkbox'; input.checked = !!sel[key]; }
+    else if (type === 'select') {
+      input = document.createElement('select');
+      (key === 'r' ? rankOptions(sel.r) : []).forEach(function(o){ const op=document.createElement('option'); op.value=o; op.textContent=(o===''?'—':o); input.appendChild(op); });
+      input.value = sel[key] || '';
+    }
     else { input = document.createElement('input'); input.type = 'text'; input.value = sel[key] || ''; }
     input.name = key; row.appendChild(input); form.appendChild(row);
   }
-  enhanceProseEditors(form);
+  enhanceMd(form);
 
   const extra=document.getElementById('edit-extra');
   extra.innerHTML='';
@@ -1196,6 +1200,7 @@ async function openEditor() {
     fetch('/api/node/'+encodeURIComponent(sel.id)+'/stats').then(r=>r.ok?r.json():null).then(d=>{
       const s=(d&&d.stats&&typeof d.stats==='object')?d.stats:{};
       buildStatForm(sform, s);
+      enhanceMd(sform);
     }).catch(()=>{});
     syncSheet();
   } else {
@@ -1209,24 +1214,39 @@ async function openEditor() {
 }
 
 let _mdeInstances = [];
-// Wrap the long-form prose textareas in EasyMDE if the library is present.
-// Degrades silently to plain textareas when it isn't (or if init throws).
-function enhanceProseEditors(form){
-  if (!window.EasyMDE) return;
-  form.querySelectorAll('textarea[data-md]').forEach(function(ta){
-    if (ta._mde) return;
-    try {
-      ta._mde = new EasyMDE({
-        element: ta,
-        spellChecker: false,
-        status: false,
-        minHeight: '90px',
-        toolbar: ['bold','italic','heading-smaller','|','unordered-list','ordered-list','|','link','preview','guide'],
-        previewRender: function(plain){ return renderAbilitiesMarkdown(plain); }
-      });
-      _mdeInstances.push(ta._mde);
-    } catch (_) { /* leave the plain textarea in place */ }
+// Turn one textarea into an EasyMDE editor (if the lib is present). Degrades
+// silently to a plain textarea when it isn't, or if init throws.
+function enhanceTextarea(ta){
+  if (!window.EasyMDE || !ta || ta._mde) return (ta && ta._mde) || null;
+  try {
+    ta._mde = new EasyMDE({
+      element: ta,
+      spellChecker: false,
+      status: false,
+      minHeight: '90px',
+      toolbar: ['bold','italic','heading-smaller','|','unordered-list','ordered-list','|','link','preview','guide'],
+      previewRender: function(plain){ return renderAbilitiesMarkdown(plain); }
+    });
+    _mdeInstances.push(ta._mde);
+    return ta._mde;
+  } catch (_) { return null; }
+}
+// Lazy: only build the editor the first time the field is focused. Keeps the
+// editor panel fast to open even with many list-item fields (e.g. 30+ traits).
+function bindLazyMd(ta){
+  if (!ta || ta._mdeLazy) return;
+  ta._mdeLazy = true;
+  ta.addEventListener('focus', function onFocus(){
+    ta.removeEventListener('focus', onFocus);
+    const inst = enhanceTextarea(ta);
+    if (inst && inst.codemirror) { try { inst.codemirror.focus(); } catch (_) {} }
   });
+}
+// Eager-enhance [data-md] fields; lazy-bind [data-md-lazy] fields, under a root.
+function enhanceMd(root){
+  if (!root) return;
+  root.querySelectorAll('textarea[data-md]').forEach(enhanceTextarea);
+  root.querySelectorAll('textarea[data-md-lazy]').forEach(bindLazyMd);
 }
 function teardownProseEditors(){
   _mdeInstances.forEach(function(mde){ try { mde.toTextArea(); } catch (_) {} });
@@ -1438,7 +1458,6 @@ async function reloadTreeAndSelect(idToSelect) {
   }
 
   rerenderTree();
-  buildTabs();
 
   if (idToSelect && nodeMap[idToSelect]) {
     selectNode(nodeMap[idToSelect]);
@@ -1452,63 +1471,62 @@ async function reloadTreeAndSelect(idToSelect) {
   }
 }
 
+function ensureAddChildUI(){
+  if(document.getElementById('addchild-panel')) return;
+  const p=document.createElement('div'); p.id='addchild-panel'; p.className='modal-overlay';
+  p.innerHTML=
+    '<div class="edit-card" style="width:min(440px,calc(100vw - 32px))">'+
+    '<div class="edit-head"><strong>Add child entry</strong><button id="ac-close" type="button">×</button></div>'+
+    '<label class="edit-row"><span>Name</span><input id="ac-name" type="text" autocomplete="off"></label>'+
+    '<label class="edit-row"><span>Rank</span><select id="ac-rank"></select></label>'+
+    '<label class="edit-row"><span>Scientific name (optional)</span><input id="ac-sn" type="text" autocomplete="off"></label>'+
+    '<div class="edit-actions"><button id="ac-create" type="button">Create</button><button id="ac-cancel" type="button">Cancel</button><span id="ac-status"></span></div>'+
+    '</div>';
+  document.body.appendChild(p);
+  document.getElementById('ac-close').onclick=closeAddChildDialog;
+  document.getElementById('ac-cancel').onclick=closeAddChildDialog;
+  document.getElementById('ac-create').onclick=submitAddChild;
+  document.getElementById('ac-name').addEventListener('keydown',e=>{ if(e.key==='Enter') submitAddChild(); });
+  p.addEventListener('mousedown',e=>{ if(e.target===p) closeAddChildDialog(); });
+}
+function closeAddChildDialog(){ const p=document.getElementById('addchild-panel'); if(p) p.classList.remove('open'); }
 function openAddChildDialog() {
   if (!sel) return;
-
-  const name = prompt('New child name:');
-
-  if (!name || !name.trim()) return;
-
-  const rank = prompt('Rank for new child:', nextLikelyRank(sel.r || '') || 'Entry');
-
-  if (rank === null) return;
-
-  const sciName = prompt('Scientific name, optional:', '');
-
-  if (sciName === null) return;
-
+  ensureAddChildUI();
+  const def=nextLikelyRank(sel.r||'');
+  const rs=document.getElementById('ac-rank'); rs.innerHTML='';
+  rankOptions(def).forEach(function(o){ const op=document.createElement('option'); op.value=o; op.textContent=(o===''?'—':o); rs.appendChild(op); });
+  rs.value=def;
+  document.getElementById('ac-name').value='';
+  document.getElementById('ac-sn').value='';
+  document.getElementById('ac-status').textContent='';
+  document.getElementById('addchild-panel').classList.add('open');
+  document.getElementById('ac-name').focus();
+}
+function submitAddChild(){
+  if(!sel) return;
+  const name=document.getElementById('ac-name').value.trim();
+  const status=document.getElementById('ac-status');
+  if(!name){ status.textContent='Name is required.'; return; }
+  const rank=document.getElementById('ac-rank').value.trim();
+  const sciName=document.getElementById('ac-sn').value.trim();
+  closeAddChildDialog();
   createChildNode({
     parentId: sel.id,
     node: {
-      n: name.trim(),
-      sn: sciName.trim(),
-      r: rank.trim() || 'Entry',
-      summary: '',
-      tax: '',
-      ap: '',
-      eco: '',
-      beh: '',
-      traitsText: '',
-      abilities: '',
-      bg: '',
-      note: '',
-      gorge: !!sel.gorge,
-      ctx: !!sel.ctx,
-      theorized: false,
-      fossil: false,
-      curse: false,
-      c: []
+      n: name, sn: sciName, r: rank || 'Entry',
+      summary:'', tax:'', ap:'', eco:'', beh:'', traitsText:'', abilities:'', bg:'', note:'',
+      gorge: !!sel.gorge, ctx: !!sel.ctx, theorized:false, fossil:false, curse:false, c:[]
     }
   });
 }
 
 function nextLikelyRank(rank) {
-  const order = [
-    'Domain',
-    'Kingdom',
-    'Phylum',
-    'Class',
-    'Order',
-    'Family',
-    'Genus',
-    'Species',
-    'Subspecies'
-  ];
-
-  const idx = order.indexOf(rank);
-
-  if (idx === -1) return 'Entry';
-  return order[Math.min(idx + 1, order.length - 1)];
+  const bio=['Domain','Kingdom','Phylum','Class','Order','Family','Genus','Species','Subspecies'];
+  const dei=['Pantheon','Major Deity','Minor Deity','Demigod','Archdevil','Archdemon','Archangel','Archfey','Avatar','Divine Servitor'];
+  let i=bio.indexOf(rank); if(i!==-1) return bio[Math.min(i+1,bio.length-1)];
+  i=dei.indexOf(rank); if(i!==-1) return dei[Math.min(i+1,dei.length-1)];
+  return 'Entry';
 }
 
 async function createChildNode(payload) {

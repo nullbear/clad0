@@ -183,8 +183,8 @@ body{
 /* ── ENTRY SECTIONS ── */
 .e-section{margin-bottom:14px}
 .e-head{
-  font-family:'Cinzel',serif;font-size:8.5px;font-weight:600;
-  letter-spacing:.14em;text-transform:uppercase;
+  font-family:'Cinzel',serif;font-size:16px;font-weight:600;
+  letter-spacing:.06em;text-transform:uppercase;
   color:#5a3e1a;margin-bottom:5px;
   display:flex;align-items:center;gap:8px;
 }
@@ -214,9 +214,9 @@ body{
 
 .entry-body section h3 {
   font-family: 'Cinzel', serif;
-  font-size: 8.5px;
+  font-size: 16px;
   font-weight: 600;
-  letter-spacing: .14em;
+  letter-spacing: .06em;
   text-transform: uppercase;
   color: #5a3e1a;
   margin: 0 0 5px 0;
@@ -244,23 +244,19 @@ body{
   margin-bottom: 0;
 }
 
-.entry-body section.tax-text p {
-  font-size: 14.5px;
-  color: #2a1a08;
+/* Section-level accents only — do NOT restyle each <p>, so markdown
+   (emphasis, lists, multiple paragraphs) renders normally. */
+.entry-body section.tax-text {
   background: rgba(180, 140, 60, .06);
-  border-left: 2px solid rgba(130, 80, 30, .35);
+  border-left: 2px solid rgba(130, 80, 30, .30);
   padding: 6px 10px;
   border-radius: 0 3px 3px 0;
 }
-
-.entry-body section.ap-text p {
-  font-size: 14.5px;
-  color: #1a1208;
-  font-style: italic;
-  border-left: 2px solid rgba(80, 120, 60, .35);
+.entry-body section.ap-text {
+  background: rgba(80, 120, 60, .04);
+  border-left: 2px solid rgba(80, 120, 60, .30);
   padding: 6px 10px;
   border-radius: 0 3px 3px 0;
-  background: rgba(80, 120, 60, .04);
 }
 
 .entry-body section.abilities-text p {
@@ -350,13 +346,6 @@ body{
 
 /* ── QUICKTABS: SEMICIRCULAR CODE TABS ── */
 #tab-col{position:absolute;right:0;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:3px;z-index:20;pointer-events:auto;align-items:flex-end}
-.thumbtab{position:relative;width:50px;height:24px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0 4px 0 8px;border-radius:16px 0 0 16px;border:1px solid rgba(70,45,15,.45);border-right:none;background:#ede3c4;box-shadow:inset 2px 0 5px rgba(255,255,255,.25),0 1px 2px rgba(0,0,0,.15);transition:width .12s,filter .12s,background .12s}
-.thumbtab:hover{width:58px;filter:brightness(1.04)}
-.thumbtab.active{width:62px;background:#d3b66a;border-color:rgba(50,30,10,.65)}
-.thumbtab::before{content:'';position:absolute;left:2px;top:50%;transform:translateY(-50%);width:8px;height:16px;border-radius:8px 0 0 8px;background:rgba(58,46,28,.24);box-shadow:inset 1px 0 2px rgba(0,0,0,.25)}
-.thumbtab-body,.thumbtab-hole{display:none}
-.thumbtab-label{position:relative;z-index:2;writing-mode:horizontal-tb;transform:none;font-family:'Cinzel',serif;font-size:7.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#1f1408;white-space:nowrap;text-align:center;line-height:1}
-.thumbtab.active .thumbtab-label{color:#080502}
 .id-chip{font-family:'Cinzel',serif;font-size:8px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#3a2808;background:rgba(170,120,50,.14);border:1px solid rgba(100,65,25,.32);padding:2px 7px;border-radius:10px;display:inline-flex;align-items:center;gap:3px}
 .rule-link{font-family:'Cinzel',serif;font-size:8px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#4a2a08;border:1px solid rgba(100,65,25,.35);background:rgba(170,120,50,.10);padding:6px 10px;border-radius:12px;cursor:pointer;display:inline-block;margin-top:8px}.rule-link:hover{background:rgba(170,120,50,.18)}
 
@@ -762,16 +751,14 @@ body{
 /* ── tree indicators: flags, chunk state, attachments, prose/image size ──── */
 .tlbl{ display:flex; align-items:center; width:100%; }
 
-/* multiple custom flags, each its own colour (hue from slug) */
-.tflags{ display:inline-flex; gap:3px; margin-left:6px; flex-wrap:wrap; }
-.tflag{
-  font-size:8.5px; line-height:1.5; padding:0 5px; border-radius:7px; white-space:nowrap;
-  font-family:'EB Garamond',serif; letter-spacing:.02em;
-  background:hsl(var(--fh,40) 62% 90%); color:hsl(var(--fh,40) 55% 26%);
-  border:1px solid hsl(var(--fh,40) 45% 70%);
+/* Custom flags are not shown in the tree (search-only); see .ebadge.flagchip
+   for the detail-view chips. Automatic stale flag IS shown here. */
+.tstale{
+  margin-left:6px; padding:0 6px; border-radius:7px; white-space:nowrap;
+  font-family:'Cinzel',serif; font-size:8px; font-weight:700; letter-spacing:.08em;
+  text-transform:uppercase; color:#7a3a10; background:#f3d9a6; border:1px solid #d59a4a;
 }
-/* whole-row tint + solid border for species carrying a stat sheet */
-.trow.has-flags{ background:hsla(var(--flag-hue,40),70%,55%,.10); border-radius:2px; }
+.trow.is-stale > .tlbl{ box-shadow: inset 2px 0 0 0 #d59a4a; }
 .trow.has-statsheet > .tlbl{ box-shadow: inset 0 0 0 1px rgba(90,74,20,.75); border-radius:2px; }
 
 .tind-marks{ display:inline-flex; gap:4px; align-items:center; margin-left:auto; padding-left:8px; font-size:11px; line-height:1; }
@@ -945,3 +932,53 @@ body{
 .EasyMDEContainer .editor-toolbar button:hover{ background:#e3d4b0; border-color:#cbb88c; }
 .EasyMDEContainer .editor-preview{ background:#fbf7ee; font-family:'EB Garamond',Georgia,serif; }
 .EasyMDEContainer .cm-s-easymde .cm-strong{ color:#5a4a14; }
+
+/* ── rank dropdown + add-child dialog ───────────────────────────────────── */
+.edit-row select{
+  width:100%; box-sizing:border-box; padding:8px;
+  border:1px solid rgba(80,50,20,0.3); border-radius:8px;
+  background:rgba(255,255,255,0.55); font:inherit;
+}
+.modal-overlay{
+  position:fixed; inset:0; display:none; align-items:center; justify-content:center;
+  background:rgba(20,12,4,0.45); z-index:9999;
+}
+.modal-overlay.open{ display:flex; }
+.modal-overlay #ac-close{ font-size:22px; border:0; background:transparent; cursor:pointer; }
+.modal-overlay .edit-actions button{
+  font:inherit; padding:7px 14px; border-radius:8px;
+  border:1px solid rgba(80,50,20,.3); background:#e3d4b0; cursor:pointer;
+}
+.modal-overlay .edit-actions #ac-status{ flex:1; font-size:12px; color:#7a1c1c; }
+
+/* ── statblock: epithet line under the name ─────────────────────────────── */
+.sb-epithet{ font-style:italic; font-size:12.5px; color:#7a5a2a; margin:1px 0 2px; }
+
+/* ── editor polish (users spend real time here) ─────────────────────────── */
+.edit-card{ width: min(820px, calc(100vw - 32px)); }
+/* sticky action bar so Save/Cancel are always reachable in the long form */
+.edit-card .edit-actions{
+  position:sticky; bottom:0; z-index:3;
+  background:#f5ead0; margin:14px -18px -18px; padding:12px 18px;
+  border-top:1px solid rgba(130,80,30,.28);
+}
+/* clearer separation between stat-sheet groups */
+.edit-card .stat-block,
+.edit-card .stat-list,
+.edit-card .stat-inline{
+  margin-top:16px; padding-top:12px; border-top:1px solid rgba(130,80,30,.16);
+}
+.stat-list-head{
+  font-family:'Cinzel',serif; font-size:12.5px; color:#7a2e12; letter-spacing:.03em;
+  display:flex; align-items:center; gap:8px; margin-bottom:4px;
+}
+.edit-attach-head{ font-size:13px; }
+/* roomy, vertically-stacked list items — full-width text for long abilities */
+.stat-item{
+  display:block; position:relative; margin:6px 0; padding:7px 8px;
+  border:1px solid rgba(130,80,30,.14); border-radius:6px; background:rgba(255,255,255,.28);
+}
+.stat-item-name{ width:calc(100% - 30px); margin-bottom:5px; }
+.stat-item .stat-del{ position:absolute; top:6px; right:6px; }
+.stat-item-text{ width:100%; box-sizing:border-box; }
+.stat-item .EasyMDEContainer{ width:100%; }

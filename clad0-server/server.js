@@ -82,7 +82,7 @@ const PROSE_KEYS = new Set([
   'n', 'r', 'sn', 'g', 'summary', 'tax', 'ap', 'eco', 'ecology', 'beh', 'behavior',
   'traitsText', 'traits', 'abilities', 'abil', 'bg', 'background',
   'note', 'conv', 't', 'gorge', 'ctx', 'fossil', 'theorized', 'curse', 'tag',
-  'rankMismatch', 'expectedRank', 'hierarchicalRankPosition', 'css', 'flags', '_kg',
+  'rankMismatch', 'expectedRank', 'hierarchicalRankPosition', 'css', 'flags', 'staleExempt', 'revised', '_kg',
 ]);
 
 // The subset of those that carry the data *bulk*. These live in per-node detail
@@ -700,6 +700,7 @@ const server = http.createServer(async (req, res) => {
     // Write prose to data/prose/<id>.json (creating it if absent) and strip the
     // bulk from the tree node. This also migrates any prose that was still inline.
     persistDetail(node, detailUpdates);
+    node.revised = Date.now();        // server-authoritative revision time (drives stale tracking)
     saveData();
 
     console.log(`[clad0] PUT node ${id}: updated [${changed.join(', ')}]`);
@@ -734,6 +735,7 @@ const server = http.createServer(async (req, res) => {
     if (!newNode.n) newNode.n = 'New Entry';
     if (!newNode.r) newNode.r = 'Entry';
     if (!newNode.c) newNode.c = [];
+    newNode.revised = Date.now();    // fresh on creation; stale tracking starts now
 
     if (!parent.c) parent.c = [];
     parent.c.push(newNode);
