@@ -112,7 +112,6 @@ function vis(n){
   return true;
 }
 function anyVis(n){if(vis(n)) return true;return (n.c||[]).some(ch=>anyVis(ch));}
-function isTreeHidden(n){ return !!(n && n.treeHidden); }
 
 function rankClass(r){
   return 'rank-'+String(r||'species').toLowerCase().replace(/[^a-z0-9]+/g,'-');
@@ -273,22 +272,10 @@ function buildNode(n,depth){
   return wrap;
 }
 
-function buildTreeRoot(){
-  if(!isTreeHidden(ROOT)){
-    const r=buildNode(ROOT,0);
-    if(r) TI.appendChild(r);
-    return;
-  }
-  (ROOT.c||[]).forEach(ch=>{
-    if(!anyVis(ch)) return;
-    const cv=buildNode(ch,0);
-    if(cv) TI.appendChild(cv);
-  });
-}
-
 function rerenderTree(){
   TI.innerHTML='';
-  buildTreeRoot();
+  const r=buildNode(ROOT,0);
+  if(r) TI.appendChild(r);
   // update node count
   let v=0;function cv2(n){if(vis(n))v++;(n.c||[]).forEach(cv2);}cv2(ROOT);
 }
