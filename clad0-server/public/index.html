@@ -28,6 +28,7 @@
       <button class="fltog on smtog" id="tg-curse">☠</button>
       <button class="fltog smtog" id="btn-exp">⊞</button>
       <button class="fltog smtog" id="btn-col">⊟</button>
+      <button class="fltog smtog" id="btn-sunburst" title="Sunburst view">❂</button>
     </div>
     <div id="tree-scroll"><div id="tree-inner"></div></div>
     <div class="pgnum" id="pgnum-left">i.</div>
@@ -59,6 +60,18 @@
     <div class="pgnum" id="pgnum-right">ii.</div>
   </div>
 </div>
+<div id="sunburst-view" hidden>
+  <div id="sunburst-bar">
+    <button id="sb-exit" title="Back to the index">← Index</button>
+    <nav id="sb-crumbs"></nav>
+    <div id="sb-actions">
+      <button id="sb-add" disabled>+ Add child</button>
+      <button id="sb-edit" disabled>Edit entry</button>
+    </div>
+  </div>
+  <div id="sunburst-canvas"></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.js"></script>

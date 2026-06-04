@@ -982,3 +982,47 @@ body{
 .stat-item .stat-del{ position:absolute; top:6px; right:6px; }
 .stat-item-text{ width:100%; box-sizing:border-box; }
 .stat-item .EasyMDEContainer{ width:100%; }
+
+/* ── SUNBURST MODE ──────────────────────────────────────────────────────── */
+#btn-sunburst.on{ background:#7a2e12; color:#fbf3d0; border-color:#5a2008; }
+#sunburst-view{
+  position:fixed; inset:0; z-index:40; display:flex; flex-direction:column;
+  background:#f4ead2;
+  background-image:radial-gradient(ellipse at 50% 40%, #faf3e0 0%, #efe2c4 70%, #e7d8b6 100%);
+}
+#sunburst-view[hidden]{ display:none; }
+#sunburst-bar{
+  flex:0 0 auto; display:flex; align-items:center; gap:14px;
+  padding:8px 16px; background:rgba(122,46,18,.06);
+  border-bottom:1px solid rgba(130,80,30,.3);
+}
+#sunburst-bar button{
+  font:inherit; font-size:12px; padding:5px 10px; border-radius:7px;
+  border:1px solid rgba(80,50,20,.3); background:#e9dcbd; color:#3a2a12; cursor:pointer;
+}
+#sunburst-bar button:hover:not(:disabled){ background:#ddcaa2; }
+#sunburst-bar button:disabled{ opacity:.45; cursor:default; }
+#sb-exit{ font-weight:600; }
+#sb-actions{ display:flex; gap:8px; margin-left:auto; }
+#sb-crumbs{ display:flex; flex-wrap:wrap; align-items:center; gap:4px; overflow:hidden; }
+.sb-crumb{
+  font:inherit !important; font-size:12px !important; padding:2px 6px !important;
+  border:0 !important; background:transparent !important; color:#6a4a20 !important;
+  cursor:pointer; border-radius:5px; max-width:240px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.sb-crumb:hover{ background:rgba(122,46,18,.12) !important; }
+.sb-crumb.current{ color:#7a2e12 !important; font-family:'Cinzel',serif !important; font-weight:600; }
+.sb-sep{ color:#b09a70; font-size:12px; }
+#sunburst-canvas{
+  flex:1; min-height:0; display:flex; align-items:center; justify-content:center; padding:10px;
+}
+#sunburst-canvas svg{ display:block; }
+.sb-label{ fill:#23170a; paint-order:stroke; stroke:#faf3e0; stroke-width:2.2px; stroke-linejoin:round; }
+.sb-center{ fill:#7a2e12; font-family:'Cinzel',serif; font-size:11px; }
+.sb-msg{ max-width:460px; text-align:center; color:#7a3a10; font-style:italic; line-height:1.6; }
+
+/* ── editor: renamable slug + stable id ─────────────────────────────────── */
+#edit-slug{ font-family:'SFMono-Regular',Consolas,monospace; font-size:12px; }
+#edit-slug.invalid{ border-color:#b03020; background:#fbeee9; }
+.edit-idrow .edit-idmsg{ font-size:10.5px; color:#7a5a2a; margin-top:3px; font-style:italic; }
+.edit-idrow .edit-idmsg.err{ color:#b03020; font-style:normal; font-weight:600; }

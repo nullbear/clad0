@@ -112,7 +112,6 @@ function vis(n){
   return true;
 }
 function anyVis(n){if(vis(n)) return true;return (n.c||[]).some(ch=>anyVis(ch));}
-function isTreeHidden(n){ return !!(n && n.treeHidden); }
 
 function rankClass(r){
   return 'rank-'+String(r||'species').toLowerCase().replace(/[^a-z0-9]+/g,'-');
@@ -273,22 +272,10 @@ function buildNode(n,depth){
   return wrap;
 }
 
-function buildTreeRoot(){
-  if(!isTreeHidden(ROOT)){
-    const r=buildNode(ROOT,0);
-    if(r) TI.appendChild(r);
-    return;
-  }
-  (ROOT.c||[]).forEach(ch=>{
-    if(!anyVis(ch)) return;
-    const cv=buildNode(ch,0);
-    if(cv) TI.appendChild(cv);
-  });
-}
-
 function rerenderTree(){
   TI.innerHTML='';
-  buildTreeRoot();
+  const r=buildNode(ROOT,0);
+  if(r) TI.appendChild(r);
   // update node count
   let v=0;function cv2(n){if(vis(n))v++;(n.c||[]).forEach(cv2);}cv2(ROOT);
 }
@@ -1184,6 +1171,34 @@ async function openEditor() {
     else { input = document.createElement('input'); input.type = 'text'; input.value = sel[key] || ''; }
     input.name = key; row.appendChild(input); form.appendChild(row);
   }
+
+  // Renamable slug (id) + immutable stable id (sid). Renaming moves the
+  // slug-named files server-side; crosslinks (which use the sid) are unaffected.
+  const idRow = document.createElement('div'); idRow.className = 'edit-row edit-idrow';
+  const idT = document.createElement('span'); idT.textContent = 'ID / slug (renamable)';
+  const idIn = document.createElement('input'); idIn.type = 'text'; idIn.id = 'edit-slug';
+  idIn.value = sel.id; idIn.autocomplete = 'off'; idIn.spellcheck = false;
+  const idMsg = document.createElement('div'); idMsg.className = 'edit-idmsg';
+  idRow.appendChild(idT); idRow.appendChild(idIn); idRow.appendChild(idMsg);
+  form.insertBefore(idRow, form.firstChild);
+  function validateSlug(){
+    const v = idIn.value.trim();
+    const saveBtn = document.getElementById('edit-save');
+    let err = '';
+    if (!v) err = 'Slug cannot be empty.';
+    else if (v !== sel.id && nodeMap[v]) err = 'Slug already in use by another entry.';
+    if (err){
+      idIn.classList.add('invalid'); idMsg.textContent = err; idMsg.classList.add('err');
+      if (saveBtn) saveBtn.disabled = true;
+    } else {
+      idIn.classList.remove('invalid'); idMsg.classList.remove('err');
+      idMsg.textContent = (v !== sel.id ? 'will rename files · ' : '') + 'stable id: ' + (sel.sid || '— (assigned on save)');
+      if (saveBtn) saveBtn.disabled = false;
+    }
+  }
+  idIn.addEventListener('input', validateSlug);
+  validateSlug();
+
   enhanceMd(form);
 
   const extra=document.getElementById('edit-extra');
@@ -1294,7 +1309,16 @@ async function saveEditor() {
 
   status.textContent = 'Saving…';
 
-  const res = await fetch('/api/node/' + encodeURIComponent(sel.id), {
+  const slugIn = document.getElementById('edit-slug');
+  const newSlug = slugIn ? slugIn.value.trim() : sel.id;
+  if (!newSlug || (newSlug !== sel.id && nodeMap[newSlug])) {
+    status.textContent = 'Fix the slug before saving.';
+    return;
+  }
+  if (newSlug !== sel.id) payload.id = newSlug;
+  const oldId = sel.id;
+
+  const res = await fetch('/api/node/' + encodeURIComponent(oldId), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
@@ -1306,6 +1330,8 @@ async function saveEditor() {
     status.textContent = data.error || 'Save failed';
     return;
   }
+  if (data.sid) sel.sid = data.sid;
+  const finalId = data.id || newSlug;
 
   // Persist the 5e stat sheet (species only; toggle off or empty clears it).
   if (sel.r === 'Species') {
@@ -1313,7 +1339,7 @@ async function saveEditor() {
     const sform = document.getElementById('edit-stat-form');
     if (tgl && sform) {
       const stats = tgl.checked ? readStatForm(sform) : null;
-      const sres = await fetch('/api/node/' + encodeURIComponent(sel.id) + '/stats', {
+      const sres = await fetch('/api/node/' + encodeURIComponent(finalId) + '/stats', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stats: stats || {} })
@@ -1482,6 +1508,8 @@ async function reloadTreeAndSelect(idToSelect) {
   } else {
     selectNode(ROOT);
   }
+
+  if (sunburstOn) renderSunburst(idToSelect || (sel && sel.id));
 }
 
 function ensureAddChildUI(){
@@ -1827,6 +1855,187 @@ async function autosortChildren(){
   } catch (err) {
     alert('Sort failed: ' + err.message);
   }
+}
+
+// ── SUNBURST MODE ──────────────────────────────────────────────────────────
+// A zoomable D3 sunburst that replaces the book view. Editing reuses the same
+// modal editor / add-child dialog as the tree (they're body-level overlays).
+let sunburstOn = false;
+let sbState = null;
+
+function toggleSunburst(){
+  sunburstOn = !sunburstOn;
+  const v = document.getElementById('sunburst-view');
+  const btn = document.getElementById('btn-sunburst');
+  if (sunburstOn){
+    v.hidden = false;
+    if (btn) btn.classList.add('on');
+    renderSunburst(sel && sel.id);
+  } else {
+    v.hidden = true;
+    if (btn) btn.classList.remove('on');
+  }
+}
+
+function sbUpdateBar(node){
+  const crumbs = document.getElementById('sb-crumbs');
+  const editBtn = document.getElementById('sb-edit');
+  const addBtn = document.getElementById('sb-add');
+  if (!crumbs) return;
+  crumbs.innerHTML = '';
+  const chain = node.ancestors().reverse();
+  chain.forEach((d, i) => {
+    if (i) { const sep = document.createElement('span'); sep.className = 'sb-sep'; sep.textContent = '›'; crumbs.appendChild(sep); }
+    const a = document.createElement('button');
+    a.className = 'sb-crumb' + (i === chain.length - 1 ? ' current' : '');
+    a.textContent = d.data.n || d.data.id || '(unnamed)';
+    a.onclick = () => sbZoom(d, true);
+    crumbs.appendChild(a);
+  });
+  const node0 = nodeMap[node.data.id];
+  if (node0) sel = node0;
+  const isRoot = node === sbState.root;
+  if (editBtn) editBtn.disabled = isRoot || !node0;
+  if (addBtn) addBtn.disabled = !node0;
+}
+
+function sbZoom(p, animate){
+  if (!sbState) return;
+  const { root, path, label, arc, radius, g, parent } = sbState;
+  sbState.focus = p;
+  parent.datum(p.parent || root);
+  const node0 = nodeMap[p.data.id];
+  if (node0) sel = node0;
+  sbUpdateBar(p);
+
+  root.each(d => d.target = {
+    x0: Math.max(0, Math.min(1, (d.x0 - p.x0) / (p.x1 - p.x0))) * 2 * Math.PI,
+    x1: Math.max(0, Math.min(1, (d.x1 - p.x0) / (p.x1 - p.x0))) * 2 * Math.PI,
+    y0: Math.max(0, d.y0 - p.depth),
+    y1: Math.max(0, d.y1 - p.depth)
+  });
+
+  const arcVisible = d => d.y1 <= 3 && d.y0 >= 1 && d.x1 > d.x0;
+  const labelVisible = d => d.y1 <= 3 && d.y0 >= 1 && (d.y1 - d.y0) * (d.x1 - d.x0) > 0.03;
+  const labelTransform = d => {
+    const x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
+    const y = (d.y0 + d.y1) / 2 * radius;
+    return `rotate(${x - 90}) translate(${y},0) rotate(${x < 180 ? 0 : 180})`;
+  };
+  const op = d => arcVisible(d) ? (d.children ? 0.85 : 0.6) : 0;
+
+  const t = g.transition().duration(animate ? 650 : 0);
+  path.transition(t).tween('data', d => { const i = d3.interpolate(d.current, d.target); return tt => d.current = i(tt); })
+    .filter(function(d){ return +this.getAttribute('fill-opacity') || arcVisible(d.target); })
+    .attr('fill-opacity', d => op(d.target))
+    .attr('pointer-events', d => arcVisible(d.target) ? 'auto' : 'none')
+    .attrTween('d', d => () => arc(d.current));
+  label.filter(function(d){ return +this.getAttribute('fill-opacity') || labelVisible(d.target); })
+    .transition(t)
+    .attr('fill-opacity', d => +labelVisible(d.target))
+    .attrTween('transform', d => () => labelTransform(d.current));
+}
+
+function renderSunburst(focusId){
+  const canvas = document.getElementById('sunburst-canvas');
+  if (!canvas) return;
+  canvas.innerHTML = '';
+  if (!window.d3){
+    canvas.innerHTML = '<div class="sb-msg">D3 could not be loaded (it is fetched from a CDN and needs internet). The sunburst view is unavailable offline — the tree and search still work.</div>';
+    return;
+  }
+
+  const size = Math.max(280, Math.min(canvas.clientWidth || 800, canvas.clientHeight || 800));
+  const radius = size / 6;
+
+  const root = d3.hierarchy(ROOT, d => d.c)
+    .sum(d => (d.c && d.c.length) ? 0 : 1)
+    .sort((a, b) => b.value - a.value);
+  d3.partition().size([2 * Math.PI, root.height + 1])(root);
+  root.each(d => d.current = d);
+
+  const palette = d3.scaleOrdinal(d3.quantize(d3.interpolateRainbow, Math.max(2, (ROOT.c ? ROOT.c.length : 8) + 1)));
+  const colorOf = d => {
+    let a = d; while (a.depth > 1) a = a.parent;
+    const id = a.data && a.data.id;
+    return (id && kgColor[id]) || palette((a.data && (a.data.id || a.data.n)) || '');
+  };
+
+  const arc = d3.arc()
+    .startAngle(d => d.x0).endAngle(d => d.x1)
+    .padAngle(d => Math.min((d.x1 - d.x0) / 2, 0.005)).padRadius(radius * 1.5)
+    .innerRadius(d => d.y0 * radius)
+    .outerRadius(d => Math.max(d.y0 * radius, d.y1 * radius - 1));
+
+  const arcVisible = d => d.y1 <= 3 && d.y0 >= 1 && d.x1 > d.x0;
+  const labelVisible = d => d.y1 <= 3 && d.y0 >= 1 && (d.y1 - d.y0) * (d.x1 - d.x0) > 0.03;
+  const labelTransform = d => {
+    const x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
+    const y = (d.y0 + d.y1) / 2 * radius;
+    return `rotate(${x - 90}) translate(${y},0) rotate(${x < 180 ? 0 : 180})`;
+  };
+
+  const svg = d3.create('svg')
+    .attr('viewBox', [-size / 2, -size / 2, size, size])
+    .attr('width', '100%').attr('height', '100%')
+    .style('max-width', '100%').style('max-height', '100%')
+    .style('font', '10px "EB Garamond", Georgia, serif');
+  const g = svg.append('g');
+
+  const path = g.append('g').selectAll('path')
+    .data(root.descendants().slice(1))
+    .join('path')
+      .attr('fill', d => colorOf(d))
+      .attr('fill-opacity', d => arcVisible(d.current) ? (d.children ? 0.85 : 0.6) : 0)
+      .attr('pointer-events', d => arcVisible(d.current) ? 'auto' : 'none')
+      .attr('stroke', '#2a1c0c').attr('stroke-opacity', 0.12).attr('stroke-width', 0.5)
+      .attr('d', d => arc(d.current));
+  path.style('cursor', 'pointer').on('click', (event, d) => sbZoom(d, true));
+  path.append('title').text(d => d.ancestors().map(a => a.data.n).reverse().join(' › ') + (d.data.r ? ('\n' + d.data.r) : ''));
+
+  const label = g.append('g')
+      .attr('pointer-events', 'none').attr('text-anchor', 'middle').style('user-select', 'none')
+    .selectAll('text').data(root.descendants().slice(1)).join('text')
+      .attr('class', 'sb-label')
+      .attr('dy', '0.35em')
+      .attr('fill-opacity', d => +labelVisible(d.current))
+      .attr('transform', d => labelTransform(d.current))
+      .text(d => d.data.n || '');
+
+  const parent = g.append('circle')
+      .datum(root)
+      .attr('r', radius).attr('fill', 'none').attr('pointer-events', 'all')
+      .style('cursor', 'pointer')
+      .on('click', () => { const f = sbState.focus; if (f && f.parent) sbZoom(f.parent, true); });
+  const centerLabel = g.append('text')
+      .attr('class', 'sb-center').attr('text-anchor', 'middle').attr('dy', '0.35em')
+      .attr('pointer-events', 'none').text('');
+
+  canvas.appendChild(svg.node());
+  sbState = { root, path, label, arc, radius, g, parent, palette, focus: root, centerLabel };
+
+  let focusNode = root;
+  if (focusId){ const f = root.descendants().find(d => d.data.id === focusId); if (f) focusNode = f; }
+  if (focusNode !== root) sbZoom(focusNode, false);
+  else sbUpdateBar(root);
+}
+
+// sunburst wiring
+{
+  const sb = document.getElementById('btn-sunburst');
+  if (sb) sb.addEventListener('click', toggleSunburst);
+  const ex = document.getElementById('sb-exit');
+  if (ex) ex.addEventListener('click', () => { if (sunburstOn) toggleSunburst(); });
+  const ed = document.getElementById('sb-edit');
+  if (ed) ed.addEventListener('click', () => { if (sel) openEditor(); });
+  const ad = document.getElementById('sb-add');
+  if (ad) ad.addEventListener('click', () => { if (sel) openAddChildDialog(); });
+  let rt = null;
+  window.addEventListener('resize', () => {
+    if (!sunburstOn) return;
+    clearTimeout(rt);
+    rt = setTimeout(() => renderSunburst(sbState && sbState.focus && sbState.focus.data.id), 200);
+  });
 }
 
 // ── BOOTSTRAP ──────────────────────────────────────────────────────────────

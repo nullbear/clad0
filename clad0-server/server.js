@@ -49,6 +49,8 @@ const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg']);
 
 let ROOT = null;
 let nodeMap = {};
+let sidIndex = {};        // stable id (sid) → node; sid is immutable, slug (id) is renamable
+let sidSeq = 0;           // high-water mark for generated sids (pattern k000001)
 
 function loadData() {
   const raw = fs.readFileSync(DATA_FILE, 'utf8');
@@ -59,13 +61,57 @@ function loadData() {
 
 function rebuildIndex() {
   nodeMap = {};
+  sidIndex = {};
+  sidSeq = 0;
   indexTree(ROOT);
 }
 
 function indexTree(node) {
   if (!node || !node.id) return;
   nodeMap[node.id] = node;
+  if (node.sid) {
+    sidIndex[node.sid] = node;
+    const m = /^k(\d+)$/.exec(node.sid);
+    if (m) sidSeq = Math.max(sidSeq, parseInt(m[1], 10));
+  }
   for (const child of (node.c || [])) indexTree(child);
+}
+
+// Immutable surrogate id. Crosslinks reference this; it stores (follows) the
+// current slug. Format k000001, incrementing, collision-checked.
+function genSid() {
+  let s;
+  do { sidSeq += 1; s = 'k' + String(sidSeq).padStart(6, '0'); } while (sidIndex[s]);
+  return s;
+}
+function ensureSid(node) {
+  if (node && !node.sid) { node.sid = genSid(); sidIndex[node.sid] = node; }
+  return node && node.sid;
+}
+function moveFileIf(src, dst) {
+  try {
+    if (fs.existsSync(src)) {
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      fs.renameSync(src, dst);
+      return true;
+    }
+  } catch (e) { console.error('[clad0] file rename failed:', src, '→', dst, e.message); }
+  return false;
+}
+// Rename the slug-keyed side files old → new. The sid is unchanged and keeps
+// pointing at this node, so crosslinks (which hold the sid) need no rewriting.
+function renameSlug(node, from, to) {
+  const moved = [];
+  if (moveFileIf(detailPath(from), detailPath(to))) moved.push('prose');
+  if (moveFileIf(statsPath(from), statsPath(to))) moved.push('stats');
+  for (const kind of ['monster', 'banner']) {
+    const ext = imageExt(from, kind);
+    if (ext && moveFileIf(imagePath(from, kind, ext), imagePath(to, kind, ext))) moved.push(kind);
+  }
+  delete nodeMap[from];
+  node.id = to;
+  nodeMap[to] = node;
+  return moved;
 }
 
 function saveData() {
@@ -576,6 +622,27 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ── sanity scan (read-only): duplicate slugs / sids, and nodes missing a sid ──
+  if (method === 'GET' && pname === '/api/sanity') {
+    const slugCounts = {}, sidCounts = {}, missingSid = [];
+    let total = 0;
+    (function walk(n){
+      if (!n) return;
+      total += 1;
+      slugCounts[n.id] = (slugCounts[n.id] || 0) + 1;
+      if (n.sid) sidCounts[n.sid] = (sidCounts[n.sid] || 0) + 1; else missingSid.push(n.id);
+      (n.c || []).forEach(walk);
+    })(ROOT);
+    const dupSlugs = Object.entries(slugCounts).filter(([, c]) => c > 1).map(([slug, count]) => ({ slug, count }));
+    const dupSids = Object.entries(sidCounts).filter(([, c]) => c > 1).map(([sid, count]) => ({ sid, count }));
+    sendJSON(res, 200, {
+      ok: true,
+      totals: { nodes: total, uniqueSlugs: Object.keys(slugCounts).length, withSid: total - missingSid.length },
+      dupSlugs, dupSids, missingSid
+    });
+    return;
+  }
+
   // ── stat sheets ──
   if (pname.startsWith('/api/node/') && pname.endsWith('/stats')) {
     const id = decodeURIComponent(pname.slice('/api/node/'.length, -'/stats'.length));
@@ -682,11 +749,20 @@ const server = http.createServer(async (req, res) => {
     const body = await readJSON(req, res);
     if (!body) return;
 
+    // Optional slug (id) rename. The sid is immutable and follows the node, so
+    // crosslinks need no rewriting — only the slug-named side files move.
+    let rename = null;
+    if (typeof body.id === 'string' && body.id.trim() && body.id.trim() !== id) {
+      const newId = body.id.trim();
+      if (nodeMap[newId]) { sendJSON(res, 409, { error: `Slug already in use: ${newId}` }); return; }
+      rename = { from: id, to: newId };
+    }
+
     const detailUpdates = {};
     const changed = [];
 
     for (const [k, v] of Object.entries(body)) {
-      if (k === 'id' || k === 'c') continue;
+      if (k === 'id' || k === 'c' || k === 'sid') continue;
       if (!PROSE_KEYS.has(k) && !k.startsWith('_')) continue;
 
       if (DETAIL_KEYS.has(k)) {
@@ -697,14 +773,20 @@ const server = http.createServer(async (req, res) => {
       changed.push(k);
     }
 
-    // Write prose to data/prose/<id>.json (creating it if absent) and strip the
+    ensureSid(node);                  // lock in a stable surrogate id if absent
+    let movedFiles = [];
+    if (rename) { movedFiles = renameSlug(node, rename.from, rename.to); changed.push('id'); }
+
+    // Write prose to data/prose/<slug>.json (creating it if absent) and strip the
     // bulk from the tree node. This also migrates any prose that was still inline.
     persistDetail(node, detailUpdates);
     node.revised = Date.now();        // server-authoritative revision time (drives stale tracking)
     saveData();
 
-    console.log(`[clad0] PUT node ${id}: updated [${changed.join(', ')}]`);
-    sendJSON(res, 200, { ok: true, id, changed });
+    const finalId = node.id;
+    console.log(`[clad0] PUT node ${id}: updated [${changed.join(', ')}]` +
+      (rename ? ` (renamed → ${finalId}; moved: ${movedFiles.join(', ') || 'none'})` : ''));
+    sendJSON(res, 200, { ok: true, id: finalId, sid: node.sid, renamedFrom: rename ? rename.from : null, changed });
     return;
   }
 
@@ -736,6 +818,7 @@ const server = http.createServer(async (req, res) => {
     if (!newNode.r) newNode.r = 'Entry';
     if (!newNode.c) newNode.c = [];
     newNode.revised = Date.now();    // fresh on creation; stale tracking starts now
+    ensureSid(newNode);              // assign an immutable surrogate id
 
     if (!parent.c) parent.c = [];
     parent.c.push(newNode);
