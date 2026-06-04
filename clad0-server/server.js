@@ -98,6 +98,16 @@ function moveFileIf(src, dst) {
   } catch (e) { console.error('[clad0] file rename failed:', src, '→', dst, e.message); }
   return false;
 }
+function copyFileIf(src, dst) {
+  try {
+    if (fs.existsSync(src)) {
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      fs.copyFileSync(src, dst);
+      return true;
+    }
+  } catch (e) { console.error('[clad0] file copy failed:', src, '→', dst, e.message); }
+  return false;
+}
 // Rename the slug-keyed side files old → new. The sid is unchanged and keeps
 // pointing at this node, so crosslinks (which hold the sid) need no rewriting.
 function renameSlug(node, from, to) {
@@ -114,6 +124,33 @@ function renameSlug(node, from, to) {
   return moved;
 }
 
+// Deep-clone a node and its subtree. Each clone gets a fresh sid + unique slug;
+// prose is re-externalised to the clone's own detail file and stats/images are
+// copied. Used by Duplicate and (later) create-from-template.
+function cloneSubtree(src, opts) {
+  opts = opts || {};
+  const full = assembleNode(src);              // merges detail file + derived flags
+  const newSlug = uniqueId(opts.slug || (src.id + '-copy'));
+  const clone = {};
+  for (const [k, v] of Object.entries(full)) {
+    if (k === 'c' || k === 'sid' || k === 'img' || k === 'banner' || k === 'hasStats') continue;
+    clone[k] = (v && typeof v === 'object') ? JSON.parse(JSON.stringify(v)) : v;
+  }
+  clone.id = newSlug;
+  clone.sid = genSid();
+  if (opts.name) clone.n = opts.name;
+  clone.revised = Date.now();
+  nodeMap[newSlug] = clone; sidIndex[clone.sid] = clone;   // register for sibling uniqueness
+  copyFileIf(statsPath(src.id), statsPath(newSlug));
+  for (const kind of ['monster', 'banner']) {
+    const ext = imageExt(src.id, kind);
+    if (ext) copyFileIf(imagePath(src.id, kind, ext), imagePath(newSlug, kind, ext));
+  }
+  clone.c = (src.c || []).map(ch => cloneSubtree(ch, {}));
+  persistDetail(clone, null);                  // write prose to the clone's detail file, strip from node
+  return clone;
+}
+
 function saveData() {
   const tmp = DATA_FILE + '.tmp';
   const json = JSON.stringify(ROOT);
@@ -121,14 +158,12 @@ function saveData() {
   fs.renameSync(tmp, DATA_FILE);
 }
 
-/* ── EDITABLE / DETAIL FIELD CLASSIFICATION ───────────────────────────────── */
-
 // All keys the API will accept on a write (existing allowlist; unchanged).
 const PROSE_KEYS = new Set([
   'n', 'r', 'sn', 'g', 'summary', 'tax', 'ap', 'eco', 'ecology', 'beh', 'behavior',
   'traitsText', 'traits', 'abilities', 'abil', 'bg', 'background',
   'note', 'conv', 't', 'gorge', 'ctx', 'fossil', 'theorized', 'curse', 'tag',
-  'rankMismatch', 'expectedRank', 'hierarchicalRankPosition', 'css', 'flags', 'staleExempt', 'revised', '_kg',
+  'rankMismatch', 'expectedRank', 'hierarchicalRankPosition', 'css', 'flags', 'staleExempt', 'revised', 'fields', '_kg',
 ]);
 
 // The subset of those that carry the data *bulk*. These live in per-node detail
@@ -303,13 +338,23 @@ function buildMeta() {
 // Pull any DETAIL_KEYS currently sitting inline on a tree node (legacy state).
 function inlineDetail(node) {
   const out = {};
-  for (const k of DETAIL_KEYS) if (k in node) out[k] = node[k];
+  for (const k of detailKeysFor(node)) if (k in node) out[k] = node[k];
   return out;
 }
 
 // Remove DETAIL_KEYS from a tree node so the tree stays slim.
 function stripDetail(node) {
-  for (const k of DETAIL_KEYS) if (k in node) delete node[k];
+  for (const k of detailKeysFor(node)) if (k in node) delete node[k];
+}
+
+// A manual field of type 'prose' carries bulk text, so its value is externalised
+// just like the built-in prose sections. Other field types stay light on the node.
+function isProseFieldType(t) { return t === 'prose'; }
+function detailKeysFor(node) {
+  if (!node || !Array.isArray(node.fields)) return DETAIL_KEYS;
+  const ks = new Set(DETAIL_KEYS);
+  for (const f of node.fields) if (f && f.key && isProseFieldType(f.type)) ks.add(f.key);
+  return ks;
 }
 
 // Build the object sent to the client for a single node: the slim tree node's
@@ -338,9 +383,10 @@ function persistDetail(node, updates) {
   if (updates) {
     for (const [k, v] of Object.entries(updates)) detail[k] = v;
   }
-  // Only keep recognised detail keys in the file.
+  // Only keep recognised detail keys in the file (built-in + schema prose fields).
+  const keep = detailKeysFor(node);
   for (const k of Object.keys(detail)) {
-    if (!DETAIL_KEYS.has(k)) delete detail[k];
+    if (!keep.has(k)) delete detail[k];
   }
   writeDetail(node.id, detail);
   stripDetail(node);
@@ -724,6 +770,36 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (method === 'POST' && pname.startsWith('/api/node/') && pname.endsWith('/duplicate')) {
+    const id = decodeURIComponent(pname.slice('/api/node/'.length, -'/duplicate'.length));
+    const src = nodeMap[id];
+    if (!src) { sendJSON(res, 404, { error: `Node not found: ${id}` }); return; }
+    const body = await readJSON(req, res);
+    if (!body) return;
+
+    let parent, insertAt;
+    if (body.parentId) {
+      parent = nodeMap[body.parentId];
+      if (!parent) { sendJSON(res, 404, { error: `Parent not found: ${body.parentId}` }); return; }
+      parent.c = parent.c || [];
+      insertAt = parent.c.length;                   // template instance → last child of target
+    } else {
+      const loc = findParent(ROOT, id);
+      if (!loc) { sendJSON(res, 400, { error: 'Cannot duplicate the root' }); return; }
+      parent = loc.parent;
+      insertAt = loc.index + 1;                      // plain duplicate → sibling right after source
+    }
+
+    const clone = cloneSubtree(src, { name: body.name, slug: body.slug });
+    parent.c = parent.c || [];
+    parent.c.splice(insertAt, 0, clone);
+    saveData();
+
+    console.log(`[clad0] DUPLICATE ${id} → ${clone.id} (sid ${clone.sid}) under ${parent.id}`);
+    sendJSON(res, 201, { ok: true, id: clone.id, sid: clone.sid, parentId: parent.id, node: assembleNode(clone) });
+    return;
+  }
+
   if (method === 'GET' && pname.startsWith('/api/node/')) {
     const id = decodeURIComponent(pname.slice('/api/node/'.length));
     const node = nodeMap[id];
@@ -761,11 +837,18 @@ const server = http.createServer(async (req, res) => {
     const detailUpdates = {};
     const changed = [];
 
+    // Resolve the entry's field schema (incoming overrides stored) so we can
+    // accept its declared keys and externalise the prose-type ones.
+    const schema = Array.isArray(body.fields) ? body.fields : (node.fields || []);
+    const schemaKeys = new Set(schema.map(f => f && f.key).filter(Boolean));
+    const schemaProse = new Set(schema.filter(f => f && isProseFieldType(f.type) && f.key).map(f => f.key));
+
     for (const [k, v] of Object.entries(body)) {
       if (k === 'id' || k === 'c' || k === 'sid') continue;
-      if (!PROSE_KEYS.has(k) && !k.startsWith('_')) continue;
+      const allowed = PROSE_KEYS.has(k) || k === 'fields' || schemaKeys.has(k) || k.startsWith('_');
+      if (!allowed) continue;
 
-      if (DETAIL_KEYS.has(k)) {
+      if (DETAIL_KEYS.has(k) || schemaProse.has(k)) {
         detailUpdates[k] = v;        // routed to the detail file
       } else {
         node[k] = v;                 // light metadata stays on the tree node

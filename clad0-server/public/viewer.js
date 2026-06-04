@@ -580,6 +580,36 @@ function basicMarkdown(text){
 function addAbilitiesSection(title, text, cls='abilities-text'){
   return '<section class="'+cls+'"><h3>'+title+'</h3>'+renderAbilitiesMarkdown(text)+'</section>';
 }
+
+// ── MANUAL FIELD SCHEMA ──────────────────────────────────────────────────────
+// An entry may carry `fields`: an ordered [{key,label,type,options?}] schema.
+// When present it replaces the hardcoded taxa/guide layout. Types:
+//   prose  → markdown body section      short → italic line in the header (like sn)
+//   text   → short labelled body line    check → "Yes" badge line when true
+//   select → labelled body line (from options)
+const SCHEMA_FIELD_TYPES = [
+  ['prose','Prose section'], ['short','Short line (header, italic)'],
+  ['text','Short text line'], ['check','Checkbox'], ['select','Select (options)']
+];
+function hasFieldSchema(n){ return Array.isArray(n.fields) && n.fields.length > 0; }
+function schemaShortFields(n){ return hasFieldSchema(n) ? n.fields.filter(f => f && f.type === 'short') : []; }
+function renderSchemaBody(n){
+  let h = '';
+  (n.fields || []).forEach(function(f){
+    if (!f || !f.key || f.type === 'short') return;   // short fields live in the header
+    const v = n[f.key];
+    const label = escHtml(f.label || f.key);
+    if (f.type === 'prose') {
+      if (v && String(v).trim()) h += '<section><h3>' + label + '</h3>' + renderAbilitiesMarkdown(v) + '</section>';
+    } else if (f.type === 'check') {
+      if (v) h += '<div class="e-section"><div class="e-head">' + label + '</div><div class="e-line">Yes</div></div>';
+    } else { // text / select
+      if (v != null && String(v).trim()) h += '<div class="e-section"><div class="e-head">' + label + '</div><div class="e-line">' + escHtml(String(v)) + '</div></div>';
+    }
+  });
+  if (!h) h = '<section class="e-empty"><em>No content yet — open Edit to fill in this entry’s fields.</em></section>';
+  return h;
+}
 function renderDetail(n){
   const rk=n.r||'';
   const tag=n.tag||'';
@@ -612,7 +642,16 @@ function renderDetail(n){
     rs.textContent=rk;
     erkEl.appendChild(rs);
   }
-  if(n.sn){const sn=document.createElement('span');sn.style.cssText='font-style:italic;font-size:14px;color:#6a4a20;font-family:EB Garamond,serif';sn.textContent=n.sn;erkEl.appendChild(sn);}
+  const _shorts = hasFieldSchema(n)
+    ? schemaShortFields(n).map(function(f){ return { key:f.key, label:f.label, val:n[f.key] }; })
+    : (n.sn ? [{ key:'sn', label:'', val:n.sn }] : []);
+  _shorts.forEach(function(s){
+    if (!s.val) return;
+    const sn=document.createElement('span');
+    sn.style.cssText='font-style:italic;font-size:14px;color:#6a4a20;font-family:EB Garamond,serif';
+    sn.textContent=(s.key!=='sn' && s.label ? (s.label+': ') : '')+s.val;
+    erkEl.appendChild(sn);
+  });
   if(isDead){const t=document.createElement('span');t.className='rank-stamp fossil';t.textContent='† Extinct';erkEl.appendChild(t);}
   if(isTheo){const t=document.createElement('span');t.className='rank-stamp theorized';t.textContent='? Inferred — no specimen';erkEl.appendChild(t);}
   if(n.curse){const t=document.createElement('span');t.className='rank-stamp curse-tag';t.textContent='☠ Curse vector';erkEl.appendChild(t);}
@@ -662,7 +701,9 @@ function renderDetail(n){
   }
 
   const guideEntry = (n.tag==='Reference'||n.tag==='Catalogue');
-  if(guideEntry){
+  if(hasFieldSchema(n)){
+    html+=renderSchemaBody(n);
+  } else if(guideEntry){
     html+=addSection('1. Purpose', sectionText(n,'summary'));
     html+=addSection('2. Scope & Status', sectionText(n,'tax'), 'tax-text');
     html+=addSection('3. Display Convention', sectionText(n,'appearance'), 'ap-text');
@@ -808,6 +849,9 @@ const EDIT_FIELDS = [
   ['expectedRank', 'Expected rank (if mismatched)', 'text'],
   ['css', 'Flags (separate with ; — e.g. To Do; New Content)', 'text']
 ];
+// The built-in prose sections — shown only for entries WITHOUT a custom field
+// schema. Schema entries render their own fields instead.
+const EDIT_LEGACY_PROSE = new Set(['summary','tax','ap','eco','beh','traitsText','abilities','bg','note']);
 
 function ensureEditorUI() {
   if (document.getElementById('edit-panel')) return;
@@ -1149,6 +1193,101 @@ function restoreSelectionRow() {
   if (row) row.classList.add('sel');
 }
 
+let _editorHadSchema = false;
+
+function slugifyKey(s){ return String(s||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,''); }
+function uniqueFieldKey(fields){
+  const used = new Set((fields||[]).map(f=>f&&f.key));
+  let i=1, k='field1'; while(used.has(k)){ i++; k='field'+i; } return k;
+}
+
+// Build the "Custom fields" editor: per-field value inputs + a definition list
+// (key / label / type, add / remove / reorder). Operates on sel.fields in place.
+function buildSchemaEditor(form){
+  const wrap=document.createElement('div'); wrap.id='edit-schema'; wrap.className='edit-schema-block';
+  form.appendChild(wrap);
+  const head=document.createElement('div'); head.className='edit-attach-head'; head.textContent='Custom fields'; wrap.appendChild(head);
+
+  if(!hasFieldSchema(sel)){
+    const note=document.createElement('div'); note.className='schema-note';
+    note.textContent='This entry uses the built-in layout. Add custom fields to give it its own sections (recommended for World / Reference entries).';
+    wrap.appendChild(note);
+    const btn=document.createElement('button'); btn.type='button'; btn.className='schema-btn';
+    btn.textContent='＋ Use custom fields';
+    btn.onclick=function(){ sel.fields=[{key:'overview',label:'Overview',type:'prose'}]; wrap.remove(); buildSchemaEditor(form); };
+    wrap.appendChild(btn);
+    return;
+  }
+
+  const values={};
+  sel.fields.forEach(f=>{ if(f&&f.key) values[f.key]= (sel[f.key]!=null?sel[f.key]:(f.type==='check'?false:'')); });
+
+  const valuesEl=document.createElement('div'); valuesEl.className='schema-values'; wrap.appendChild(valuesEl);
+  const defsHead=document.createElement('div'); defsHead.className='schema-defs-head'; defsHead.textContent='Field definitions (key · label · type)'; wrap.appendChild(defsHead);
+  const defsEl=document.createElement('div'); defsEl.className='schema-defs'; wrap.appendChild(defsEl);
+  const addBtn=document.createElement('button'); addBtn.type='button'; addBtn.className='schema-btn'; addBtn.textContent='＋ Add field'; wrap.appendChild(addBtn);
+
+  function readValuesFromDom(){
+    valuesEl.querySelectorAll('[data-fkey]').forEach(el=>{
+      const k=el.dataset.fkey, t=el.dataset.ftype;
+      if(t==='check') values[k]=el.checked;
+      else if(el._mde) values[k]=el._mde.value();
+      else values[k]=el.value;
+    });
+  }
+  function refresh(){ readValuesFromDom(); renderValues(); renderDefs(); }
+
+  function renderValues(){
+    valuesEl.innerHTML='';
+    sel.fields.forEach(f=>{
+      if(!f||!f.key) return;
+      const row=document.createElement('label'); row.className='edit-row';
+      const t=document.createElement('span'); t.textContent=(f.label||f.key); row.appendChild(t);
+      let input;
+      if(f.type==='prose'){ input=document.createElement('textarea'); input.rows=4; input.dataset.mdLazy='1'; input.value=values[f.key]||''; }
+      else if(f.type==='check'){ input=document.createElement('input'); input.type='checkbox'; input.checked=!!values[f.key]; }
+      else if(f.type==='select'){
+        input=document.createElement('select');
+        const opts=Array.isArray(f.options)?f.options:String(f.options||'').split(',').map(s=>s.trim()).filter(Boolean);
+        const blank=document.createElement('option'); blank.value=''; blank.textContent='—'; input.appendChild(blank);
+        opts.forEach(o=>{const op=document.createElement('option');op.value=o;op.textContent=o;input.appendChild(op);});
+        input.value=values[f.key]||'';
+      }
+      else { input=document.createElement('input'); input.type='text'; input.value=values[f.key]||''; }
+      input.dataset.fkey=f.key; input.dataset.ftype=f.type||'text';
+      row.appendChild(input); valuesEl.appendChild(row);
+    });
+    enhanceMd(valuesEl);
+  }
+
+  function renderDefs(){
+    defsEl.innerHTML='';
+    sel.fields.forEach((f,i)=>{
+      const r=document.createElement('div'); r.className='schema-def';
+      const key=document.createElement('input'); key.type='text'; key.value=f.key||''; key.placeholder='key'; key.className='sd-key';
+      const lab=document.createElement('input'); lab.type='text'; lab.value=f.label||''; lab.placeholder='label'; lab.className='sd-label';
+      const typ=document.createElement('select'); SCHEMA_FIELD_TYPES.forEach(p=>{const op=document.createElement('option');op.value=p[0];op.textContent=p[1];typ.appendChild(op);}); typ.value=f.type||'prose';
+      const up=document.createElement('button'); up.type='button'; up.textContent='↑'; up.className='sd-mv';
+      const dn=document.createElement('button'); dn.type='button'; dn.textContent='↓'; dn.className='sd-mv';
+      const del=document.createElement('button'); del.type='button'; del.textContent='×'; del.className='sd-del';
+      key.onchange=()=>{ readValuesFromDom(); const old=f.key; const nk=slugifyKey(key.value)||old; if(nk!==old){ values[nk]=values[old]; delete values[old]; f.key=nk; } refresh(); };
+      lab.oninput=()=>{ f.label=lab.value; };
+      typ.onchange=()=>{ readValuesFromDom(); f.type=typ.value; refresh(); };
+      up.onclick=()=>{ if(i>0){ readValuesFromDom(); sel.fields.splice(i-1,0,sel.fields.splice(i,1)[0]); refresh(); } };
+      dn.onclick=()=>{ if(i<sel.fields.length-1){ readValuesFromDom(); sel.fields.splice(i+1,0,sel.fields.splice(i,1)[0]); refresh(); } };
+      del.onclick=()=>{ readValuesFromDom(); sel.fields.splice(i,1); if(!sel.fields.length){ sel.fields=null; wrap.remove(); buildSchemaEditor(form); } else refresh(); };
+      r.appendChild(key); r.appendChild(lab); r.appendChild(typ);
+      if(f.type==='select'){ const opt=document.createElement('input'); opt.type='text'; opt.className='sd-opts'; opt.placeholder='options, comma-separated'; opt.value=Array.isArray(f.options)?f.options.join(', '):(f.options||''); opt.onchange=()=>{ f.options=opt.value.split(',').map(s=>s.trim()).filter(Boolean); }; r.appendChild(opt); }
+      r.appendChild(up); r.appendChild(dn); r.appendChild(del);
+      defsEl.appendChild(r);
+    });
+  }
+
+  addBtn.onclick=()=>{ readValuesFromDom(); sel.fields.push({key:uniqueFieldKey(sel.fields),label:'New field',type:'prose'}); refresh(); };
+
+  renderValues(); renderDefs();
+}
+
 async function openEditor() {
   if (!sel) return;
   await ensureDetailLoaded(sel);
@@ -1157,7 +1296,9 @@ async function openEditor() {
   const form = document.getElementById('edit-form');
   teardownProseEditors();
   form.innerHTML = '';
+  const usingSchema = hasFieldSchema(sel);
   for (const [key, label, type] of EDIT_FIELDS) {
+    if (usingSchema && EDIT_LEGACY_PROSE.has(key)) continue;   // schema replaces these
     const row = document.createElement('label'); row.className = 'edit-row';
     const title = document.createElement('span'); title.textContent = label; row.appendChild(title);
     let input;
@@ -1200,6 +1341,8 @@ async function openEditor() {
   validateSlug();
 
   enhanceMd(form);
+  _editorHadSchema = hasFieldSchema(sel);
+  buildSchemaEditor(form);
 
   const extra=document.getElementById('edit-extra');
   extra.innerHTML='';
@@ -1317,6 +1460,18 @@ async function saveEditor() {
   }
   if (newSlug !== sel.id) payload.id = newSlug;
   const oldId = sel.id;
+
+  // Custom field schema + values
+  if (_editorHadSchema || hasFieldSchema(sel)) {
+    payload.fields = Array.isArray(sel.fields) ? sel.fields : [];
+    const valsEl = document.querySelector('#edit-schema .schema-values');
+    if (valsEl) valsEl.querySelectorAll('[data-fkey]').forEach(function(el){
+      const k = el.dataset.fkey, t = el.dataset.ftype;
+      if (t === 'check') payload[k] = el.checked;
+      else if (el._mde) payload[k] = el._mde.value().trim();
+      else payload[k] = ('' + el.value).trim();
+    });
+  }
 
   const res = await fetch('/api/node/' + encodeURIComponent(oldId), {
     method: 'PUT',
@@ -1721,7 +1876,6 @@ async function moveSelectedNode() {
 
 async function deleteSelectedNode() {
   if (!sel || !ROOT) return;
-
   if (sel.id === ROOT.id) {
     alert('Cannot delete the root entry.');
     return;
@@ -1753,6 +1907,76 @@ async function deleteSelectedNode() {
   } catch (err) {
     alert('Delete failed: ' + err.message);
   }
+}
+
+async function duplicateSelectedNode() {
+  if (!sel || !ROOT) return;
+  if (sel.id === ROOT.id) { alert('Cannot duplicate the root entry.'); return; }
+  try {
+    const res = await fetch('/api/node/' + encodeURIComponent(sel.id) + '/duplicate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: (sel.n || 'Entry') + ' (copy)' })
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'Duplicate failed.'); return; }
+    await reloadTreeAndSelect(data.id);
+  } catch (err) { alert('Duplicate failed: ' + err.message); }
+}
+
+// ── BESPOKE RIGHT-CLICK CONTEXT MENU ─────────────────────────────────────────
+let _ctxNode = null;
+function ensureCtxMenu() {
+  let m = document.getElementById('ctx-menu');
+  if (m) return m;
+  m = document.createElement('div'); m.id = 'ctx-menu'; m.className = 'ctx-menu'; m.hidden = true;
+  document.body.appendChild(m);
+  document.addEventListener('click', e => { if (!m.contains(e.target)) hideCtxMenu(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') hideCtxMenu(); });
+  document.addEventListener('scroll', hideCtxMenu, true);
+  window.addEventListener('blur', hideCtxMenu);
+  return m;
+}
+function hideCtxMenu() { const m = document.getElementById('ctx-menu'); if (m) { m.hidden = true; m.innerHTML = ''; } _ctxNode = null; }
+// Action list. Designed to be extended (Pass 4 adds "Create child from template").
+function ctxItems(node) {
+  const isRoot = node.id === (ROOT && ROOT.id);
+  const items = [
+    { label: 'Edit entry', fn: () => { selectNode(node); openEditor(); } },
+    { label: 'Add child', fn: () => { selectNode(node); openAddChildDialog(); } },
+    { label: 'Duplicate (with subtree)', fn: () => { selectNode(node); duplicateSelectedNode(); } }
+  ];
+  if (!isRoot) items.push({ sep: true }, { label: 'Delete…', danger: true, fn: () => { selectNode(node); deleteSelectedNode(); } });
+  return items;
+}
+function showCtxMenu(node, x, y) {
+  const m = ensureCtxMenu(); m.innerHTML = ''; _ctxNode = node;
+  const title = document.createElement('div'); title.className = 'ctx-title';
+  title.textContent = node.n || node.id; m.appendChild(title);
+  ctxItems(node).forEach(it => {
+    if (it.sep) { const s = document.createElement('div'); s.className = 'ctx-sep'; m.appendChild(s); return; }
+    const b = document.createElement('button'); b.type = 'button';
+    b.className = 'ctx-item' + (it.danger ? ' danger' : '') + (it.submenu ? ' has-sub' : '');
+    b.textContent = it.label + (it.submenu ? ' ▸' : '');
+    if (it.submenu) {
+      const sub = document.createElement('div'); sub.className = 'ctx-sub';
+      it.submenu.forEach(s => {
+        const sb = document.createElement('button'); sb.type = 'button'; sb.className = 'ctx-item'; sb.textContent = s.label;
+        sb.onclick = e => { e.stopPropagation(); hideCtxMenu(); s.fn && s.fn(); };
+        sub.appendChild(sb);
+      });
+      b.appendChild(sub);
+    } else {
+      b.onclick = e => { e.stopPropagation(); hideCtxMenu(); it.fn && it.fn(); };
+    }
+    m.appendChild(b);
+  });
+  m.hidden = false;
+  const vw = window.innerWidth, vh = window.innerHeight, r = m.getBoundingClientRect();
+  let px = x, py = y;
+  if (px + r.width > vw - 8) px = vw - r.width - 8;
+  if (py + r.height > vh - 8) py = vh - r.height - 8;
+  m.style.left = Math.max(8, px) + 'px';
+  m.style.top = Math.max(8, py) + 'px';
 }
 
 function countSubtree(n) {
@@ -1991,6 +2215,11 @@ function renderSunburst(focusId){
       .attr('stroke', '#2a1c0c').attr('stroke-opacity', 0.12).attr('stroke-width', 0.5)
       .attr('d', d => arc(d.current));
   path.style('cursor', 'pointer').on('click', (event, d) => sbZoom(d, true));
+  path.on('contextmenu', (event, d) => {
+    event.preventDefault();
+    const node = nodeMap[d.data.id];
+    if (node) showCtxMenu(node, event.clientX, event.clientY);
+  });
   path.append('title').text(d => d.ancestors().map(a => a.data.n).reverse().join(' › ') + (d.data.r ? ('\n' + d.data.r) : ''));
 
   const label = g.append('g')
@@ -2023,8 +2252,7 @@ function renderSunburst(focusId){
 // sunburst wiring
 {
   const sb = document.getElementById('btn-sunburst');
-  if (sb) sb.addEventListener('click', toggleSunburst);
-  const ex = document.getElementById('sb-exit');
+  if (sb) sb.addEventListener('click', toggleSunburst);  const ex = document.getElementById('sb-exit');
   if (ex) ex.addEventListener('click', () => { if (sunburstOn) toggleSunburst(); });
   const ed = document.getElementById('sb-edit');
   if (ed) ed.addEventListener('click', () => { if (sel) openEditor(); });
@@ -2035,6 +2263,19 @@ function renderSunburst(focusId){
     if (!sunburstOn) return;
     clearTimeout(rt);
     rt = setTimeout(() => renderSunburst(sbState && sbState.focus && sbState.focus.data.id), 200);
+  });
+}
+
+// right-click context menu on tree rows
+{
+  const ti = document.getElementById('tree-inner');
+  if (ti) ti.addEventListener('contextmenu', function(e){
+    const row = e.target.closest && e.target.closest('.trow');
+    if (!row) return;
+    const node = nodeMap[row.dataset.id];
+    if (!node) return;
+    e.preventDefault();
+    showCtxMenu(node, e.clientX, e.clientY);
   });
 }
 
