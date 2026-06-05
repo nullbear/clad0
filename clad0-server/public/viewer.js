@@ -281,6 +281,37 @@ function rerenderTree(){
 }
 
 /* ── DETAIL RENDER ── */
+// FIFO client cache for loaded prose. Long sessions can open hundreds of
+// entries; once the total cached prose exceeds the budget, the oldest entries'
+// bulk fields are dropped (their light tree fields stay), to be refetched on
+// demand. The currently-open entry is never evicted.
+let _detailCache = [];
+let _detailCacheBytes = 0;
+const DETAIL_CACHE_BUDGET = 2 * 1024 * 1024; // ~2 MB of prose
+function nodeProseKeys(n){
+  const ks = CLIENT_DETAIL_KEYS.slice();
+  if (Array.isArray(n.fields)) for (const f of n.fields) if (f && f.type === 'prose' && f.key) ks.push(f.key);
+  return ks;
+}
+function nodeProseBytes(n){
+  let b = 0;
+  for (const k of nodeProseKeys(n)) if (k in n && n[k] != null) b += JSON.stringify(n[k]).length;
+  return b;
+}
+function evictDetailCache(){
+  let guard = _detailCache.length;
+  while (_detailCacheBytes > DETAIL_CACHE_BUDGET && _detailCache.length > 1 && guard-- > 0) {
+    const old = _detailCache.shift();
+    const node = nodeMap[old.id];
+    if (node && sel && sel.id === old.id) { _detailCache.push(old); continue; } // keep the open entry
+    _detailCacheBytes -= old.bytes;
+    if (node) {
+      for (const k of nodeProseKeys(node)) delete node[k];
+      node._detailLoaded = false;
+    }
+  }
+}
+
 async function ensureDetailLoaded(n){
   if(!n||n._detailLoaded) return;
   try{
@@ -294,6 +325,10 @@ async function ensureDetailLoaded(n){
     }
   }catch(e){ /* offline: render whatever is already in memory */ }
   n._detailLoaded=true;
+  const bytes = nodeProseBytes(n);
+  _detailCache.push({ id: n.id, bytes });
+  _detailCacheBytes += bytes;
+  evictDetailCache();
 }
 
 function selectNode(n){
@@ -589,10 +624,26 @@ function addAbilitiesSection(title, text, cls='abilities-text'){
 //   select → labelled body line (from options)
 const SCHEMA_FIELD_TYPES = [
   ['prose','Prose section'], ['short','Short line (header, italic)'],
-  ['text','Short text line'], ['check','Checkbox'], ['select','Select (options)']
+  ['text','Short text line'], ['check','Checkbox'], ['select','Select (options)'],
+  ['crosslink','Crosslink (to another entry)']
 ];
-function hasFieldSchema(n){ return Array.isArray(n.fields) && n.fields.length > 0; }
+function hasFieldSchema(n){ return Array.isArray(n.fields); }
 function schemaShortFields(n){ return hasFieldSchema(n) ? n.fields.filter(f => f && f.type === 'short') : []; }
+// Resolve a stable id (sid) to its current node — crosslinks store the sid so
+// they survive slug renames, and display the target's current name.
+function nodeBySid(sid){
+  if (!sid) return null;
+  for (const id in nodeMap) { const m = nodeMap[id]; if (m && m.sid === sid) return m; }
+  return null;
+}
+function crosslinkSids(v){ return Array.isArray(v) ? v.filter(Boolean) : (v ? [v] : []); }
+// Parse a comma-separated list of target slugs into stable sids (rename-safe).
+function crosslinkValueFromInput(str){
+  return String(str || '').split(',').map(s => s.trim()).filter(Boolean).map(function(s){
+    const node = nodeMap[s];
+    return node ? (node.sid || s) : s;
+  });
+}
 function renderSchemaBody(n){
   let h = '';
   (n.fields || []).forEach(function(f){
@@ -602,7 +653,17 @@ function renderSchemaBody(n){
     if (f.type === 'prose') {
       if (v && String(v).trim()) h += '<section><h3>' + label + '</h3>' + renderAbilitiesMarkdown(v) + '</section>';
     } else if (f.type === 'check') {
-      if (v) h += '<div class="e-section"><div class="e-head">' + label + '</div><div class="e-line">Yes</div></div>';
+      return;   // boolean fields render as a labelled badge in the badge row, not a body line
+    } else if (f.type === 'crosslink') {
+      const sids = crosslinkSids(v);
+      if (sids.length) {
+        const links = sids.map(function(sid){
+          const t = nodeBySid(sid);
+          return t ? '<a class="xlink" data-jump="' + escHtml(t.id) + '">' + escHtml(t.n || t.id) + '</a>'
+                   : '<span class="xlink missing">(unresolved link)</span>';
+        }).join(', ');
+        h += '<div class="e-section"><div class="e-head">' + label + '</div><div class="e-line">' + links + '</div></div>';
+      }
     } else { // text / select
       if (v != null && String(v).trim()) h += '<div class="e-section"><div class="e-head">' + label + '</div><div class="e-line">' + escHtml(String(v)) + '</div></div>';
     }
@@ -682,6 +743,7 @@ function renderDetail(n){
   if(n.rankMismatch) badges+='<span class="ebadge curse"><span class="rank-mismatch-bang">!</span> Rank/position mismatch: expected '+escHtml(n.expectedRank||'next rank')+', marked '+escHtml(rk||'unranked')+'</span>';
   if(n.conv) badges+='<span class="ebadge conv">⚡ Convergent morphology</span>';
   _fl.forEach(f=>{ badges+='<span class="ebadge flagchip flag-'+f.slug+'" style="--fh:'+f.hue+'">⚑ '+escHtml(f.label)+'</span>'; });
+  if(hasFieldSchema(n)){ n.fields.forEach(function(f){ if(f&&f.type==='check'&&n[f.key]) badges+='<span class="ebadge ctx">'+escHtml(f.label||f.key)+'</span>'; }); }
   if(badges) html+='<div class="badge-row">'+badges+'</div>';
 
   // banner image (any entry) — full width, above summary & stat sheet, below meta
@@ -844,6 +906,7 @@ const EDIT_FIELDS = [
   ['fossil', 'Fossil / extinct', 'checkbox'],
   ['curse', 'Curse vector', 'checkbox'],
   ['staleExempt', 'Exempt from stale tracking', 'checkbox'],
+  ['isTemplate', 'Template (a prototype to duplicate from)', 'checkbox'],
   ['tag', 'Reference tag (e.g. Reference / Catalogue)', 'text'],
   ['rankMismatch', 'Rank-position mismatch flag', 'checkbox'],
   ['expectedRank', 'Expected rank (if mismatched)', 'text'],
@@ -1231,6 +1294,7 @@ function buildSchemaEditor(form){
     valuesEl.querySelectorAll('[data-fkey]').forEach(el=>{
       const k=el.dataset.fkey, t=el.dataset.ftype;
       if(t==='check') values[k]=el.checked;
+      else if(t==='crosslink') values[k]=crosslinkValueFromInput(el.value);
       else if(el._mde) values[k]=el._mde.value();
       else values[k]=el.value;
     });
@@ -1252,6 +1316,12 @@ function buildSchemaEditor(form){
         const blank=document.createElement('option'); blank.value=''; blank.textContent='—'; input.appendChild(blank);
         opts.forEach(o=>{const op=document.createElement('option');op.value=o;op.textContent=o;input.appendChild(op);});
         input.value=values[f.key]||'';
+      }
+      else if(f.type==='crosslink'){
+        input=document.createElement('input'); input.type='text';
+        input.placeholder='target entry slug(s), comma-separated';
+        const sids=crosslinkSids(values[f.key]);
+        input.value=sids.map(function(sid){ const t=nodeBySid(sid); return t?t.id:sid; }).join(', ');
       }
       else { input=document.createElement('input'); input.type='text'; input.value=values[f.key]||''; }
       input.dataset.fkey=f.key; input.dataset.ftype=f.type||'text';
@@ -1468,6 +1538,7 @@ async function saveEditor() {
     if (valsEl) valsEl.querySelectorAll('[data-fkey]').forEach(function(el){
       const k = el.dataset.fkey, t = el.dataset.ftype;
       if (t === 'check') payload[k] = el.checked;
+      else if (t === 'crosslink') payload[k] = crosslinkValueFromInput(el.value);
       else if (el._mde) payload[k] = el._mde.value().trim();
       else payload[k] = ('' + el.value).trim();
     });
@@ -1675,7 +1746,6 @@ function ensureAddChildUI(){
     '<div class="edit-head"><strong>Add child entry</strong><button id="ac-close" type="button">×</button></div>'+
     '<label class="edit-row"><span>Name</span><input id="ac-name" type="text" autocomplete="off"></label>'+
     '<label class="edit-row"><span>Rank</span><select id="ac-rank"></select></label>'+
-    '<label class="edit-row"><span>Scientific name (optional)</span><input id="ac-sn" type="text" autocomplete="off"></label>'+
     '<div class="edit-actions"><button id="ac-create" type="button">Create</button><button id="ac-cancel" type="button">Cancel</button><span id="ac-status"></span></div>'+
     '</div>';
   document.body.appendChild(p);
@@ -1686,35 +1756,68 @@ function ensureAddChildUI(){
   p.addEventListener('mousedown',e=>{ if(e.target===p) closeAddChildDialog(); });
 }
 function closeAddChildDialog(){ const p=document.getElementById('addchild-panel'); if(p) p.classList.remove('open'); }
-function openAddChildDialog() {
-  if (!sel) return;
+let _acParentId = null;
+let _acTemplateId = null;
+function listTemplates(){
+  const out = [];
+  (function walk(n){ if (!n) return; if (n.isTemplate) out.push(n); (n.c || []).forEach(walk); })(ROOT);
+  return out;
+}
+function openAddChildDialog(parentNode, templateId) {
+  const parent = parentNode || sel;
+  if (!parent) return;
+  _acParentId = parent.id;
+  _acTemplateId = templateId || null;
   ensureAddChildUI();
-  const def=nextLikelyRank(sel.r||'');
+  const def=nextLikelyRank(parent.r||'');
   const rs=document.getElementById('ac-rank'); rs.innerHTML='';
   rankOptions(def).forEach(function(o){ const op=document.createElement('option'); op.value=o; op.textContent=(o===''?'—':o); rs.appendChild(op); });
   rs.value=def;
   document.getElementById('ac-name').value='';
-  document.getElementById('ac-sn').value='';
-  document.getElementById('ac-status').textContent='';
+  const _acsn=document.getElementById('ac-sn'); if(_acsn) _acsn.value='';
+  const status=document.getElementById('ac-status');
+  const tmpl = _acTemplateId ? nodeMap[_acTemplateId] : null;
+  status.textContent = tmpl ? ('From template “'+(tmpl.n||tmpl.id)+'” — set this entry’s own name & rank.') : '';
   document.getElementById('addchild-panel').classList.add('open');
   document.getElementById('ac-name').focus();
 }
 function submitAddChild(){
-  if(!sel) return;
+  const parentId = _acParentId || (sel && sel.id);
+  if(!parentId) return;
   const name=document.getElementById('ac-name').value.trim();
   const status=document.getElementById('ac-status');
   if(!name){ status.textContent='Name is required.'; return; }
   const rank=document.getElementById('ac-rank').value.trim();
-  const sciName=document.getElementById('ac-sn').value.trim();
+  const snEl=document.getElementById('ac-sn');
+  const sciName=snEl?snEl.value.trim():'';
+  const templateId=_acTemplateId;
   closeAddChildDialog();
+  if(templateId){
+    duplicateFromTemplate(templateId, parentId, name, rank, sciName);
+    return;
+  }
+  // Clean, generic entry: an empty custom-field schema (no taxa sections, no
+  // inherited flags). The author adds fields via the editor, or uses a template.
   createChildNode({
-    parentId: sel.id,
-    node: {
-      n: name, sn: sciName, r: rank || 'Entry',
-      summary:'', tax:'', ap:'', eco:'', beh:'', traitsText:'', abilities:'', bg:'', note:'',
-      gorge: !!sel.gorge, ctx: !!sel.ctx, theorized:false, fossil:false, curse:false, c:[]
-    }
+    parentId,
+    node: { n: name, r: rank || 'Entry', fields: [], c: [] }
   });
+}
+// Instantiate a child by deep-duplicating a template into the parent, then
+// applying the chosen identity (rank/sci-name) and clearing the template flag.
+async function duplicateFromTemplate(templateId, parentId, name, rank, sciName){
+  try{
+    const overrides={ r: rank||'Entry', isTemplate:false };
+    if(sciName) overrides.sn=sciName;     // only override sci-name if explicitly given
+    const res = await fetch('/api/node/'+encodeURIComponent(templateId)+'/duplicate', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ parentId, name, overrides })
+    });
+    const data = await res.json();
+    if(!res.ok){ alert(data.error||'Create from template failed.'); return; }
+    expanded.add(parentId);
+    await reloadTreeAndSelect(data.id);
+  }catch(err){ alert('Create from template failed: '+err.message); }
 }
 
 function nextLikelyRank(rank) {
@@ -1942,11 +2045,18 @@ function ctxItems(node) {
   const isRoot = node.id === (ROOT && ROOT.id);
   const items = [
     { label: 'Edit entry', fn: () => { selectNode(node); openEditor(); } },
-    { label: 'Add child', fn: () => { selectNode(node); openAddChildDialog(); } },
+    { label: 'Add child', fn: () => { selectNode(node); openAddChildDialog(node, null); } },
+    { label: 'New child from template', submenu: ctxTemplateSubmenu(node) },
     { label: 'Duplicate (with subtree)', fn: () => { selectNode(node); duplicateSelectedNode(); } }
   ];
   if (!isRoot) items.push({ sep: true }, { label: 'Delete…', danger: true, fn: () => { selectNode(node); deleteSelectedNode(); } });
   return items;
+}
+// Always offers a generic "Empty entry" plus every entry flagged isTemplate.
+function ctxTemplateSubmenu(node) {
+  const sub = [{ label: 'Empty entry', fn: () => { openAddChildDialog(node, null); } }];
+  listTemplates().forEach(t => sub.push({ label: t.n || t.id, fn: () => { openAddChildDialog(node, t.id); } }));
+  return sub;
 }
 function showCtxMenu(node, x, y) {
   const m = ensureCtxMenu(); m.innerHTML = ''; _ctxNode = node;
@@ -2086,6 +2196,7 @@ async function autosortChildren(){
 // modal editor / add-child dialog as the tree (they're body-level overlays).
 let sunburstOn = false;
 let sbState = null;
+const SB_MAXY = 5;   // show 4 generations below the focus (rings span y 1..SB_MAXY)
 
 function toggleSunburst(){
   sunburstOn = !sunburstOn;
@@ -2139,25 +2250,47 @@ function sbZoom(p, animate){
     y1: Math.max(0, d.y1 - p.depth)
   });
 
-  const arcVisible = d => d.y1 <= 3 && d.y0 >= 1 && d.x1 > d.x0;
-  const labelVisible = d => d.y1 <= 3 && d.y0 >= 1 && (d.y1 - d.y0) * (d.x1 - d.x0) > 0.03;
+  const arcVisible = d => d.y1 <= SB_MAXY && d.y0 >= 1 && d.x1 > d.x0;
+  const labelVisible = d => d.y1 <= SB_MAXY && d.y0 >= 1 && (d.y1 - d.y0) * (d.x1 - d.x0) > 0.045;
   const labelTransform = d => {
     const x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
     const y = (d.y0 + d.y1) / 2 * radius;
     return `rotate(${x - 90}) translate(${y},0) rotate(${x < 180 ? 0 : 180})`;
   };
-  const op = d => arcVisible(d) ? (d.children ? 0.85 : 0.6) : 0;
+  const op = d => arcVisible(d) ? (d.children ? 0.9 : 0.7) : 0;
 
-  const t = g.transition().duration(animate ? 650 : 0);
+  // Labels never tween (a transform tween on ~1k <text> nodes tanks the frame
+  // rate); they're hidden now and snapped + faded in once geometry settles.
+  label.interrupt().attr('opacity', 0);
+  const place = () => {
+    label.attr('transform', d => labelTransform(d.current));
+    label.filter(d => labelVisible(d.current)).transition().duration(180).attr('opacity', 1);
+  };
+
+  // Count arcs in the visible band. Near the root that's hundreds, and tweening
+  // every arc's path each frame is the remaining lag — so above a threshold we
+  // snap to the target instead of animating. Deeper zooms (few arcs) still
+  // animate smoothly.
+  let nVis = 0; root.each(d => { if (arcVisible(d.target)) nVis++; });
+  if (!animate || nVis > 240) {
+    root.each(d => d.current = d.target);
+    path.interrupt()
+      .attr('fill-opacity', d => op(d.current))
+      .attr('stroke-opacity', d => arcVisible(d.current) ? 0.9 : 0)
+      .attr('pointer-events', d => arcVisible(d.current) ? 'auto' : 'none')
+      .attr('d', d => arc(d.current));
+    place();
+    return;
+  }
+
+  const t = g.transition().duration(600);
   path.transition(t).tween('data', d => { const i = d3.interpolate(d.current, d.target); return tt => d.current = i(tt); })
     .filter(function(d){ return +this.getAttribute('fill-opacity') || arcVisible(d.target); })
     .attr('fill-opacity', d => op(d.target))
+    .attr('stroke-opacity', d => arcVisible(d.target) ? 0.9 : 0)
     .attr('pointer-events', d => arcVisible(d.target) ? 'auto' : 'none')
     .attrTween('d', d => () => arc(d.current));
-  label.filter(function(d){ return +this.getAttribute('fill-opacity') || labelVisible(d.target); })
-    .transition(t)
-    .attr('fill-opacity', d => +labelVisible(d.target))
-    .attrTween('transform', d => () => labelTransform(d.current));
+  if (t.end) t.end().then(place, () => {}); else place();
 }
 
 function renderSunburst(focusId){
@@ -2170,7 +2303,7 @@ function renderSunburst(focusId){
   }
 
   const size = Math.max(280, Math.min(canvas.clientWidth || 800, canvas.clientHeight || 800));
-  const radius = size / 6;
+  const radius = (size / 2) / SB_MAXY;
 
   const root = d3.hierarchy(ROOT, d => d.c)
     .sum(d => (d.c && d.c.length) ? 0 : 1)
@@ -2178,11 +2311,24 @@ function renderSunburst(focusId){
   d3.partition().size([2 * Math.PI, root.height + 1])(root);
   root.each(d => d.current = d);
 
-  const palette = d3.scaleOrdinal(d3.quantize(d3.interpolateRainbow, Math.max(2, (ROOT.c ? ROOT.c.length : 8) + 1)));
+  // Stable hierarchical hue intervals: each node owns a hue range and divides it
+  // evenly among its children, so a node's children fan out around its colour
+  // (a purple parent → children spanning blue→red) and colours stay fixed as you
+  // zoom — they depend on tree position, never on the current focus.
+  root.hue0 = 0; root.hue1 = 360;
+  (function assignHues(node){
+    const kids = node.children || [];
+    const span = node.hue1 - node.hue0;
+    kids.forEach((k, i) => {
+      k.hue0 = node.hue0 + (span * i) / kids.length;
+      k.hue1 = node.hue0 + (span * (i + 1)) / kids.length;
+      assignHues(k);
+    });
+  })(root);
   const colorOf = d => {
-    let a = d; while (a.depth > 1) a = a.parent;
-    const id = a.data && a.data.id;
-    return (id && kgColor[id]) || palette((a.data && (a.data.id || a.data.n)) || '');
+    const hue = ((d.hue0 + d.hue1) / 2) % 360;
+    const light = Math.min(78, 46 + d.depth * 6);   // deeper rings a touch lighter
+    return `hsl(${hue.toFixed(1)}, 58%, ${light}%)`;
   };
 
   const arc = d3.arc()
@@ -2191,8 +2337,8 @@ function renderSunburst(focusId){
     .innerRadius(d => d.y0 * radius)
     .outerRadius(d => Math.max(d.y0 * radius, d.y1 * radius - 1));
 
-  const arcVisible = d => d.y1 <= 3 && d.y0 >= 1 && d.x1 > d.x0;
-  const labelVisible = d => d.y1 <= 3 && d.y0 >= 1 && (d.y1 - d.y0) * (d.x1 - d.x0) > 0.03;
+  const arcVisible = d => d.y1 <= SB_MAXY && d.y0 >= 1 && d.x1 > d.x0;
+  const labelVisible = d => d.y1 <= SB_MAXY && d.y0 >= 1 && (d.y1 - d.y0) * (d.x1 - d.x0) > 0.045;
   const labelTransform = d => {
     const x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
     const y = (d.y0 + d.y1) / 2 * radius;
@@ -2210,9 +2356,10 @@ function renderSunburst(focusId){
     .data(root.descendants().slice(1))
     .join('path')
       .attr('fill', d => colorOf(d))
-      .attr('fill-opacity', d => arcVisible(d.current) ? (d.children ? 0.85 : 0.6) : 0)
+      .attr('fill-opacity', d => arcVisible(d.current) ? (d.children ? 0.9 : 0.7) : 0)
       .attr('pointer-events', d => arcVisible(d.current) ? 'auto' : 'none')
-      .attr('stroke', '#2a1c0c').attr('stroke-opacity', 0.12).attr('stroke-width', 0.5)
+      .attr('stroke', '#f7eed6').attr('stroke-width', 1)
+      .attr('stroke-opacity', d => arcVisible(d.current) ? 0.9 : 0)
       .attr('d', d => arc(d.current));
   path.style('cursor', 'pointer').on('click', (event, d) => sbZoom(d, true));
   path.on('contextmenu', (event, d) => {
@@ -2227,7 +2374,7 @@ function renderSunburst(focusId){
     .selectAll('text').data(root.descendants().slice(1)).join('text')
       .attr('class', 'sb-label')
       .attr('dy', '0.35em')
-      .attr('fill-opacity', d => +labelVisible(d.current))
+      .attr('opacity', d => +labelVisible(d.current))
       .attr('transform', d => labelTransform(d.current))
       .text(d => d.data.n || '');
 
@@ -2241,7 +2388,7 @@ function renderSunburst(focusId){
       .attr('pointer-events', 'none').text('');
 
   canvas.appendChild(svg.node());
-  sbState = { root, path, label, arc, radius, g, parent, palette, focus: root, centerLabel };
+  sbState = { root, path, label, arc, radius, g, parent, focus: root, centerLabel };
 
   let focusNode = root;
   if (focusId){ const f = root.descendants().find(d => d.data.id === focusId); if (f) focusNode = f; }
@@ -2276,6 +2423,15 @@ function renderSunburst(focusId){
     if (!node) return;
     e.preventDefault();
     showCtxMenu(node, e.clientX, e.clientY);
+  });
+}
+
+// crosslink navigation in the entry body
+{
+  const eb = document.querySelector('#right-scroll .entry-body');
+  if (eb) eb.addEventListener('click', function(e){
+    const a = e.target.closest && e.target.closest('.xlink[data-jump]');
+    if (a) { e.preventDefault(); jumpTo(a.dataset.jump); }
   });
 }
 

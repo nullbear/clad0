@@ -163,7 +163,7 @@ const PROSE_KEYS = new Set([
   'n', 'r', 'sn', 'g', 'summary', 'tax', 'ap', 'eco', 'ecology', 'beh', 'behavior',
   'traitsText', 'traits', 'abilities', 'abil', 'bg', 'background',
   'note', 'conv', 't', 'gorge', 'ctx', 'fossil', 'theorized', 'curse', 'tag',
-  'rankMismatch', 'expectedRank', 'hierarchicalRankPosition', 'css', 'flags', 'staleExempt', 'revised', 'fields', '_kg',
+  'rankMismatch', 'expectedRank', 'hierarchicalRankPosition', 'css', 'flags', 'staleExempt', 'revised', 'fields', 'isTemplate', '_kg',
 ]);
 
 // The subset of those that carry the data *bulk*. These live in per-node detail
@@ -791,6 +791,13 @@ const server = http.createServer(async (req, res) => {
     }
 
     const clone = cloneSubtree(src, { name: body.name, slug: body.slug });
+    // Light identity overrides (e.g. create-from-template sets rank/sn and clears isTemplate)
+    if (body.overrides && typeof body.overrides === 'object') {
+      for (const [k, v] of Object.entries(body.overrides)) {
+        if (k === 'id' || k === 'c' || k === 'sid' || k === 'fields') continue;
+        clone[k] = v;
+      }
+    }
     parent.c = parent.c || [];
     parent.c.splice(insertAt, 0, clone);
     saveData();
