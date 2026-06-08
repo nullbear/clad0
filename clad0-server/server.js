@@ -38,14 +38,107 @@ const fs = require('fs');
 const path = require('path');
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
-const DATA_FILE = path.join(__dirname, 'data', 'clado.json');
-const PROSE_DIR = path.join(__dirname, 'data', 'prose');
-const STATS_DIR = path.join(__dirname, 'data', 'stats');   // monster stat sheets (per id)
-const MEDIA_DIR = path.join(__dirname, 'data', 'media');   // image graphics (per id)
+
+// The browser UI is read-only app code, but clad0's journal data is mutable.
+// In development, data defaults to clad0-server/data. In the packaged Chromium
+// app, Electron sets CLAD0_DATA_DIR to a writable per-user directory so edits do
+// not try to write inside app.asar / Program Files.
+const DATA_ROOT = process.env.CLAD0_DATA_DIR || path.join(__dirname, 'data');
+const DATA_FILE = path.join(DATA_ROOT, 'clado.json');
+const PROSE_DIR = path.join(DATA_ROOT, 'prose');
+const STATS_DIR = path.join(DATA_ROOT, 'stats');   // monster stat sheets (per id)
+const MEDIA_DIR = path.join(DATA_ROOT, 'media');   // image graphics (per id)
 const PUBLIC = path.join(__dirname, 'public');
+const PROJECT_SETTINGS_FILE = path.join(DATA_ROOT, 'project-settings.json');
 
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024; // 12 MB cap on uploaded image graphics
 const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg']);
+
+
+function mergeDeep(base, patch) {
+  const out = Array.isArray(base) ? [...base] : { ...base };
+  if (!patch || typeof patch !== 'object') return out;
+  for (const [k, v] of Object.entries(patch)) {
+    if (v && typeof v === 'object' && !Array.isArray(v) && out[k] && typeof out[k] === 'object' && !Array.isArray(out[k])) out[k] = mergeDeep(out[k], v);
+    else out[k] = v;
+  }
+  return out;
+}
+function defaultProjectSettings() {
+  return {
+    schemaVersion: 2,
+    name: path.basename(path.resolve(DATA_ROOT)) || 'clad0 Project',
+    description: '',
+    appearance: { theme: 'parchment', customThemePath: '', mediaDisplay: 'standard' },
+    features: { allowEdits: true, sunburstEnabled: true, statsEnabled: true, mediaEnabled: true, staleTrackingEnabled: true },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
+function normalizeThemeId(id) {
+  if (id === 'clean-light' || id === 'high-contrast') return 'wiki-whitepage';
+  if (id === 'dark-archive') return 'discord-dark';
+  return id || 'parchment';
+}
+function readProjectSettings() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(PROJECT_SETTINGS_FILE, 'utf8'));
+    const migrated = { ...raw };
+    delete migrated.defaultSunburstView;
+    if (migrated.appearance && migrated.appearance.theme) migrated.appearance.theme = normalizeThemeId(migrated.appearance.theme);
+    return mergeDeep(defaultProjectSettings(), { ...migrated, schemaVersion: 2 });
+  } catch {
+    return defaultProjectSettings();
+  }
+}
+const THEME_LABELS = { parchment: 'Default Parchment', 'wiki-whitepage': 'Wiki Whitepage', 'discord-dark': 'Discord Dark', 'scifi-solar': 'Sci-Fi Solarized' };
+const CORE_THEME_ORDER = ['parchment', 'wiki-whitepage', 'discord-dark', 'scifi-solar'];
+function themeLabel(id) { return THEME_LABELS[id] || String(id || '').replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); }
+function sortThemeIds(ids) {
+  return ids.sort((a, b) => { const ai = CORE_THEME_ORDER.indexOf(a), bi = CORE_THEME_ORDER.indexOf(b); if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi); return a.localeCompare(b); });
+}
+function availableThemes() {
+  try {
+    return sortThemeIds(fs.readdirSync(path.join(PUBLIC, 'themes')).filter(f => f.endsWith('.css')).map(f => path.basename(f, '.css')))
+      .map(id => ({ id, label: themeLabel(id), href: '/themes/' + id + '.css' }));
+  } catch { return []; }
+}
+
+function selectedThemeHref() {
+  const settings = readProjectSettings();
+  const app = settings.appearance || {};
+  if (app.theme === 'custom') return '/api/custom-theme.css';
+  if (app.theme) return '/themes/' + encodeURIComponent(app.theme) + '.css';
+  return '/themes/parchment.css';
+}
+function injectProjectThemeIntoIndex(html) {
+  const href = selectedThemeHref();
+  const tag = `<link id="project-theme-css" rel="stylesheet" href="${href}">`;
+  if (html.includes('id="project-theme-css"')) return html.replace(/<link[^>]+id=["']project-theme-css["'][^>]*>/, tag);
+  return html.replace('</head>', tag + '\n</head>');
+}
+
+function touchRevised(node) {
+  if (!node) return null;
+  node.revised = Date.now();
+  return node.revised;
+}
+function projectAllowsEdits() {
+  const settings = readProjectSettings();
+  return !settings.features || settings.features.allowEdits !== false;
+}
+function rejectIfReadOnly(res) {
+  if (projectAllowsEdits()) return false;
+  sendJSON(res, 403, { error: 'This project is read-only because Project Settings disables Allow edits.' });
+  return true;
+}
+function revisedStamp(node) { const x = Number(node && node.revised); return Number.isFinite(x) ? x : 0; }
+function staleConflict(node, loadedRevised, forceWrite) {
+  if (forceWrite) return false;
+  if (loadedRevised == null || loadedRevised === '') return false;
+  const client = Number(loadedRevised);
+  return Number.isFinite(client) && client !== revisedStamp(node);
+}
 
 let ROOT = null;
 let nodeMap = {};
@@ -163,17 +256,29 @@ const PROSE_KEYS = new Set([
   'n', 'r', 'sn', 'g', 'summary', 'tax', 'ap', 'eco', 'ecology', 'beh', 'behavior',
   'traitsText', 'traits', 'abilities', 'abil', 'bg', 'background',
   'note', 'conv', 't', 'gorge', 'ctx', 'fossil', 'theorized', 'curse', 'tag',
-  'rankMismatch', 'expectedRank', 'hierarchicalRankPosition', 'css', 'flags', 'staleExempt', 'revised', 'fields', 'isTemplate', '_kg',
+  'css', 'flags', 'rankStyle', 'staleExempt', 'revised', 'fields', 'isTemplate', '_kg',
 ]);
 
 // The subset of those that carry the data *bulk*. These live in per-node detail
 // files and are stripped from the tree. Everything the index/search/filters need
-// (n, r, sn, c, gorge, ctx, theorized, fossil, curse, conv, tag, rankMismatch…)
+// (n, r, sn, c, gorge, ctx, theorized, fossil, curse, conv, tag…)
 // is deliberately NOT here, so the slim tree fully drives the index.
 const DETAIL_KEYS = new Set([
   'summary', 'tax', 'ap', 'eco', 'ecology', 'beh', 'behavior',
   'traitsText', 'traits', 'abilities', 'abil', 'bg', 'background', 'g', 'note',
 ]);
+
+
+const DEPRECATED_NODE_KEYS = ['rankMismatch', 'expectedRank', 'hierarchicalRankPosition'];
+function stripDeprecatedNodeFields(node){
+  if(!node || typeof node !== 'object') return;
+  for(const k of DEPRECATED_NODE_KEYS) delete node[k];
+}
+function normalizeRankStyleValue(v){
+  const x=String(v||'').trim();
+  const legacy={Domain:'style-1',Kingdom:'style-2',Phylum:'style-3',Class:'style-4',Order:'style-5',Family:'style-6',Genus:'style-7',Species:'style-8',Subspecies:'style-8'};
+  return legacy[x] || x || 'style-8';
+}
 
 function detailPath(id) {
   return path.join(PROSE_DIR, encodeURIComponent(String(id)) + '.json');
@@ -252,6 +357,24 @@ function deleteImage(id, kind) {
   for (const ext of IMAGE_EXT) {
     try { fs.unlinkSync(imagePath(id, kind, ext)); } catch { /* ignore */ }
   }
+}
+
+function safeFieldKey(k) {
+  return String(k || '').replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'field';
+}
+function fieldImageBase(id, fieldKey) {
+  return encodeURIComponent(String(id)) + '__field__' + encodeURIComponent(safeFieldKey(fieldKey));
+}
+function fieldImagePath(id, fieldKey, ext) {
+  return path.join(MEDIA_DIR, fieldImageBase(id, fieldKey) + '.' + ext);
+}
+function deleteFieldImage(id, fieldKey) {
+  for (const ext of IMAGE_EXT) {
+    try { fs.unlinkSync(fieldImagePath(id, fieldKey, ext)); } catch { /* ignore */ }
+  }
+}
+function publicFieldImageUrl(id, fieldKey, ext) {
+  return '/media/' + fieldImageBase(id, fieldKey) + '.' + ext;
 }
 
 // Minimal image dimension reader for the formats contributors use (png/webp/
@@ -520,12 +643,39 @@ const server = http.createServer(async (req, res) => {
     const ext = path.extname(filepath);
 
     try {
-      const content = fs.readFileSync(filepath);
-      send(res, 200, MIME[ext] || 'application/octet-stream', content);
+      let content = fs.readFileSync(filepath);
+      let ctype = MIME[ext] || 'application/octet-stream';
+      if (target === '/index.html') {
+        content = injectProjectThemeIntoIndex(content.toString('utf8'));
+        ctype = 'text/html; charset=utf-8';
+      }
+      send(res, 200, ctype, content);
     } catch {
       send(res, 404, 'text/plain; charset=utf-8', `Not found: ${target}`);
     }
     return;
+  }
+
+  if (method === 'GET' && pname === '/api/project-settings') {
+    sendJSON(res, 200, { settings: readProjectSettings(), themes: availableThemes() });
+    return;
+  }
+
+  if (method === 'GET' && pname === '/api/custom-theme.css') {
+    const settings = readProjectSettings();
+    const themePath = settings && settings.appearance && settings.appearance.customThemePath;
+    if (!themePath) { send(res, 404, 'text/plain; charset=utf-8', 'No custom theme selected.'); return; }
+    try {
+      const content = fs.readFileSync(themePath, 'utf8');
+      send(res, 200, 'text/css; charset=utf-8', content);
+    } catch (err) {
+      send(res, 404, 'text/plain; charset=utf-8', 'Custom theme not found: ' + err.message);
+    }
+    return;
+  }
+
+  if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method) && pname.startsWith('/api/node')) {
+    if (rejectIfReadOnly(res)) return;
   }
 
   if (method === 'GET' && pname === '/api/clado') {
@@ -701,6 +851,10 @@ const server = http.createServer(async (req, res) => {
     if (method === 'PUT') {
       const body = await readJSON(req, res);
       if (!body) return;
+      if (staleConflict(nodeMap[id], body._loadedRevised, body._forceWrite)) {
+        sendJSON(res, 409, { error: 'This entry changed after you opened it. Reload or review before overwriting stats.', id, revised: revisedStamp(nodeMap[id]), current: assembleNode(nodeMap[id]) });
+        return;
+      }
       const stats = body.stats;
       const empty = stats == null || (typeof stats === 'string' && stats.trim() === '') ||
           (typeof stats === 'object' && Object.keys(stats).length === 0);
@@ -711,16 +865,66 @@ const server = http.createServer(async (req, res) => {
       // Empty / null clears the sheet (and its indicator); anything else is stored verbatim.
       if (empty) {
         deleteStats(id);
+        const revised = touchRevised(nodeMap[id]);
+        saveData();
         console.log(`[clad0] STATS cleared for ${id}`);
-        sendJSON(res, 200, { ok: true, id, hasStats: false });
+        sendJSON(res, 200, { ok: true, id, hasStats: false, revised });
       } else {
         writeStats(id, stats);
+        const revised = touchRevised(nodeMap[id]);
+        saveData();
         console.log(`[clad0] STATS saved for ${id}`);
-        sendJSON(res, 200, { ok: true, id, hasStats: true });
+        sendJSON(res, 200, { ok: true, id, hasStats: true, revised });
       }
       return;
     }
     sendJSON(res, 405, { error: 'Use GET or PUT for /stats' });
+    return;
+  }
+
+
+  // ── custom-field image media ──
+  if (pname.startsWith('/api/node/') && pname.endsWith('/field-media')) {
+    const id = decodeURIComponent(pname.slice('/api/node/'.length, -'/field-media'.length));
+    const node = nodeMap[id];
+    if (!node) { sendJSON(res, 404, { error: `Node not found: ${id}` }); return; }
+    const field = safeFieldKey(url.searchParams.get('field') || '');
+    const schema = Array.isArray(node.fields) ? node.fields : [];
+    const fieldDef = schema.find(f => f && f.key === field && f.type === 'image');
+    if (!fieldDef) { sendJSON(res, 400, { error: `Image field not found on this entry: ${field}` }); return; }
+
+    if (method === 'POST') {
+      const body = await readJSON(req, res);
+      if (!body) return;
+      stripDeprecatedNodeFields(node);
+    const oldSchemaKeys = new Set(Array.isArray(node.fields) ? node.fields.map(f => f && f.key).filter(Boolean) : []);
+    if (body.flags == null && body.css != null) body.flags = body.css;
+    delete node.css;
+    delete body.css;
+    for (const k of DEPRECATED_NODE_KEYS) delete body[k];
+    if (Object.prototype.hasOwnProperty.call(body, 'r')) body.r = String(body.r || '').slice(0, 16);
+
+    if (staleConflict(node, body._loadedRevised, body._forceWrite)) {
+        sendJSON(res, 409, { error: 'This entry changed after you opened it. Reload or review before overwriting field media.', id, revised: revisedStamp(node), current: assembleNode(node) });
+        return;
+      }
+      let ext = String(body.ext || (body.filename || '').split('.').pop() || '').toLowerCase();
+      if (!IMAGE_EXT.has(ext)) { sendJSON(res, 400, { error: `Unsupported image type: ${ext}` }); return; }
+      const b64 = String(body.data || '').replace(/^data:[^,]*,/, '');
+      let buf;
+      try { buf = Buffer.from(b64, 'base64'); } catch { sendJSON(res, 400, { error: 'Bad base64' }); return; }
+      if (!buf.length) { sendJSON(res, 400, { error: 'Empty image' }); return; }
+      if (buf.length > MAX_IMAGE_BYTES) { sendJSON(res, 413, { error: 'Image exceeds size limit' }); return; }
+      fs.mkdirSync(MEDIA_DIR, { recursive: true });
+      deleteFieldImage(id, field);
+      fs.writeFileSync(fieldImagePath(id, field, ext), buf);
+      node[field] = publicFieldImageUrl(id, field, ext);
+      const revised = touchRevised(node);
+      saveData();
+      sendJSON(res, 200, { ok: true, id, field, ext, value: node[field], revised });
+      return;
+    }
+    sendJSON(res, 405, { error: 'Use POST for /field-media' });
     return;
   }
 
@@ -734,6 +938,18 @@ const server = http.createServer(async (req, res) => {
     if (method === 'POST') {
       const body = await readJSON(req, res);
       if (!body) return;
+      stripDeprecatedNodeFields(node);
+    const oldSchemaKeys = new Set(Array.isArray(node.fields) ? node.fields.map(f => f && f.key).filter(Boolean) : []);
+    if (body.flags == null && body.css != null) body.flags = body.css;
+    delete node.css;
+    delete body.css;
+    for (const k of DEPRECATED_NODE_KEYS) delete body[k];
+    if (body.rankStyle != null) body.rankStyle = normalizeRankStyleValue(body.rankStyle);
+
+    if (staleConflict(node, body._loadedRevised, body._forceWrite)) {
+        sendJSON(res, 409, { error: 'This entry changed after you opened it. Reload or review before overwriting media.', id, revised: revisedStamp(node), current: assembleNode(node) });
+        return;
+      }
       const reqKind = (body.kind === 'banner') ? 'banner' : kind;
       if (reqKind === 'monster' && node.r !== 'Species') {
         sendJSON(res, 400, { error: 'Monster image graphics are only allowed on Species-rank entries' });
@@ -753,17 +969,21 @@ const server = http.createServer(async (req, res) => {
       fs.writeFileSync(imagePath(id, reqKind, ext), buf);
       const dims = imageSize(buf, ext);
       const warn = reqKind === 'banner' && (!dims || dims.w !== BANNER_IDEAL_WIDTH);
+      const revised = touchRevised(node);
+      saveData();
       console.log(`[clad0] IMAGE(${reqKind}) saved for ${id} (.${ext}, ${buf.length} bytes${dims ? `, ${dims.w}x${dims.h}` : ''})`);
       sendJSON(res, 200, {
         ok: true, id, kind: reqKind, ext, bytes: buf.length,
-        w: dims ? dims.w : null, h: dims ? dims.h : null, warn,
+        w: dims ? dims.w : null, h: dims ? dims.h : null, warn, revised,
       });
       return;
     }
     if (method === 'DELETE') {
       deleteImage(id, kind);
+      const revised = touchRevised(node);
+      saveData();
       console.log(`[clad0] IMAGE(${kind}) removed for ${id}`);
-      sendJSON(res, 200, { ok: true, id, kind });
+      sendJSON(res, 200, { ok: true, id, kind, revised });
       return;
     }
     sendJSON(res, 405, { error: 'Use POST or DELETE for /image' });
@@ -832,6 +1052,21 @@ const server = http.createServer(async (req, res) => {
     const body = await readJSON(req, res);
     if (!body) return;
 
+    stripDeprecatedNodeFields(node);
+    const oldSchemaKeys = new Set(Array.isArray(node.fields) ? node.fields.map(f => f && f.key).filter(Boolean) : []);
+    if (body.flags == null && body.css != null) body.flags = body.css;
+    delete node.css;
+    delete body.css;
+    for (const k of DEPRECATED_NODE_KEYS) delete body[k];
+    if (body.rankStyle != null) body.rankStyle = normalizeRankStyleValue(body.rankStyle);
+
+    if (staleConflict(node, body._loadedRevised, body._forceWrite)) {
+      sendJSON(res, 409, { error: 'This entry changed after you opened it. Reload or review before overwriting.', id, revised: revisedStamp(node), current: assembleNode(node) });
+      return;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'n') && !String(body.n || '').trim()) { sendJSON(res, 400, { error: 'Name cannot be empty.' }); return; }
+
     // Optional slug (id) rename. The sid is immutable and follows the node, so
     // crosslinks need no rewriting — only the slug-named side files move.
     let rename = null;
@@ -850,8 +1085,23 @@ const server = http.createServer(async (req, res) => {
     const schemaKeys = new Set(schema.map(f => f && f.key).filter(Boolean));
     const schemaProse = new Set(schema.filter(f => f && isProseFieldType(f.type) && f.key).map(f => f.key));
 
+    // If the custom-field schema is being replaced, drop values for removed or
+    // renamed field keys so light node data and prose details do not accumulate
+    // invisible orphan content. Client-side key rename copies the value to the
+    // new key before save, so deleting the old key is safe.
+    if (Array.isArray(body.fields) && oldSchemaKeys.size) {
+      const detail = hasDetail(node.id) ? readDetail(node.id) : inlineDetail(node);
+      let detailTouched = false;
+      for (const oldKey of oldSchemaKeys) {
+        if (schemaKeys.has(oldKey)) continue;
+        if (Object.prototype.hasOwnProperty.call(node, oldKey)) delete node[oldKey];
+        if (Object.prototype.hasOwnProperty.call(detail, oldKey)) { delete detail[oldKey]; detailTouched = true; }
+      }
+      if (detailTouched) writeDetail(node.id, detail);
+    }
+
     for (const [k, v] of Object.entries(body)) {
-      if (k === 'id' || k === 'c' || k === 'sid') continue;
+      if (k === 'id' || k === 'c' || k === 'sid' || k.startsWith('_')) continue;
       const allowed = PROSE_KEYS.has(k) || k === 'fields' || schemaKeys.has(k) || k.startsWith('_');
       if (!allowed) continue;
 
@@ -870,13 +1120,13 @@ const server = http.createServer(async (req, res) => {
     // Write prose to data/prose/<slug>.json (creating it if absent) and strip the
     // bulk from the tree node. This also migrates any prose that was still inline.
     persistDetail(node, detailUpdates);
-    node.revised = Date.now();        // server-authoritative revision time (drives stale tracking)
+    touchRevised(node);        // server-authoritative last-saved field (drives stale tracking)
     saveData();
 
     const finalId = node.id;
     console.log(`[clad0] PUT node ${id}: updated [${changed.join(', ')}]` +
       (rename ? ` (renamed → ${finalId}; moved: ${movedFiles.join(', ') || 'none'})` : ''));
-    sendJSON(res, 200, { ok: true, id: finalId, sid: node.sid, renamedFrom: rename ? rename.from : null, changed });
+    sendJSON(res, 200, { ok: true, id: finalId, sid: node.sid, revised: node.revised, renamedFrom: rename ? rename.from : null, changed });
     return;
   }
 
@@ -906,8 +1156,9 @@ const server = http.createServer(async (req, res) => {
 
     if (!newNode.n) newNode.n = 'New Entry';
     if (!newNode.r) newNode.r = 'Entry';
+    if (newNode.rankStyle != null) newNode.rankStyle = normalizeRankStyleValue(newNode.rankStyle);
     if (!newNode.c) newNode.c = [];
-    newNode.revised = Date.now();    // fresh on creation; stale tracking starts now
+    newNode.revised = Date.now();    // server-authoritative last-saved field; stale tracking compares this against the system clock
     ensureSid(newNode);              // assign an immutable surrogate id
 
     if (!parent.c) parent.c = [];
@@ -953,7 +1204,7 @@ const server = http.createServer(async (req, res) => {
 
 loadData();
 
-server.listen(PORT, () => {
+server.listen(PORT, '127.0.0.1', () => {
   console.log(`[clad0] server running → http://localhost:${PORT}`);
   console.log(`[clad0] data file: ${DATA_FILE}`);
   console.log(`[clad0] prose dir: ${PROSE_DIR}`);

@@ -1,0 +1,6 @@
+@import url('/themes/wiki-whitepage.css');
+:root{--accent:#0000ee;}
+
+/* Theme-specific pill surfaces */
+:root{--pill-font:"Segoe UI",system-ui,sans-serif;--pill-radius:999px;--pill-letter:.08em;--pill-bg:rgba(38,139,210,.15);--pill-ink:#eee8d5;--pill-border:#2aa198;--tag-pill-bg:rgba(42,161,152,.14);--tag-pill-ink:#2aa198;--tag-pill-border:#2aa198;--flag-pill-bg:#073642;--flag-pill-ink:#93a1a1;--flag-pill-border:#0f4b5a;--control-bg:#002b36;--control-ink:#eee8d5;--control-border:#0f4b5a;--control-hover:rgba(38,139,210,.18);--menu-bg:#073642;--menu-shadow:0 0 32px rgba(38,139,210,.18)}
+.rank-stamp,.tag-stamp,.trank,.ebadge,.id-chip,.tsize{font-family:var(--pill-font)!important;border-radius:999px!important}.ebadge.flagchip{background:var(--flag-pill-bg)!important;color:var(--flag-pill-ink)!important;border-color:var(--flag-pill-border)!important}.rank-style-button,.rank-style-option,.schema-value-edit,.field-edit-actions button{border-radius:999px!important}.rank-style-list{background:#073642!important;border-color:#0f4b5a!important}.rank-style-option:hover{background:rgba(38,139,210,.18)!important}

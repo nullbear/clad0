@@ -1,0 +1,5 @@
+@import url('/themes/discord-dark.css');
+
+/* Theme-specific pill surfaces */
+:root{--pill-font:Inter,"Segoe UI",system-ui,sans-serif;--pill-radius:8px;--pill-letter:.01em;--pill-bg:#404249;--pill-ink:#f2f3f5;--pill-border:#5865f2;--tag-pill-bg:#3f4147;--tag-pill-ink:#dbdee1;--tag-pill-border:#4e5058;--flag-pill-bg:#34373c;--flag-pill-ink:#dbdee1;--flag-pill-border:#4e5058;--control-bg:#1e1f22;--control-ink:#f2f3f5;--control-border:#4e5058;--control-hover:#404249;--menu-bg:#1e1f22;--menu-shadow:0 12px 32px rgba(0,0,0,.45)}
+.rank-stamp,.tag-stamp,.trank,.ebadge,.id-chip,.tsize{font-family:var(--pill-font)!important;border-radius:8px!important;letter-spacing:.01em!important;text-transform:none!important}.rank-stamp[class*="rank-"]::before{font-size:10px!important}.ebadge.flagchip{background:var(--flag-pill-bg)!important;color:var(--flag-pill-ink)!important;border-color:var(--flag-pill-border)!important}.rank-style-button,.rank-style-option,.schema-value-edit,.field-edit-actions button{border-radius:6px!important}.rank-style-list{background:#1e1f22!important;border-color:#4e5058!important}.rank-style-option:hover{background:#404249!important}

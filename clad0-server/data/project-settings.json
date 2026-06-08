@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 2,
+  "name": "data",
+  "description": "",
+  "appearance": {
+    "theme": "parchment",
+    "customThemePath": "",
+    "mediaDisplay": "standard"
+  },
+  "features": {
+    "allowEdits": true,
+    "sunburstEnabled": true,
+    "statsEnabled": true,
+    "mediaEnabled": true,
+    "staleTrackingEnabled": true
+  },
+  "templates": [],
+  "createdAt": "2026-06-08T06:12:40.616Z",
+  "updatedAt": "2026-06-08T19:59:25.390Z"
+}

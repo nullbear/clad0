@@ -26,6 +26,20 @@ launchers `start.bat` / `start.ps1` are included.
 
 After pulling a new build: restart the server and **hard-refresh** the browser.
 
+
+## Standalone Chromium desktop app
+
+This repo also includes an Electron wrapper for building clad0 as a Windows `.exe` while keeping `clad0-server/server.js` as the server entrypoint.
+
+```bash
+npm install
+npm start                 # run desktop shell
+npm run dist              # build Windows installer .exe
+npm run dist:portable     # build portable .exe
+```
+
+The desktop wrapper starts `clad0-server/server.js` on a random localhost port, opens it in a Chromium window, and points mutable data at Electron's writable user-data folder via `CLAD0_DATA_DIR`. See `BUILD-DESKTOP.md`.
+
 ## Repository layout
 
 ```

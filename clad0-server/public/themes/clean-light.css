@@ -1,0 +1,5 @@
+@import url('/themes/wiki-whitepage.css');
+
+/* Theme-specific pill surfaces */
+:root{--pill-font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;--pill-radius:2px;--pill-letter:.02em;--pill-bg:#f8f9fa;--pill-ink:#202122;--pill-border:#a2a9b1;--tag-pill-bg:#eaecf0;--tag-pill-ink:#202122;--tag-pill-border:#a2a9b1;--flag-pill-bg:#f8f9fa;--flag-pill-ink:#202122;--flag-pill-border:#a2a9b1;--control-bg:#fff;--control-ink:#202122;--control-border:#a2a9b1;--control-hover:#eaecf0;--menu-bg:#fff;--menu-shadow:0 2px 8px rgba(0,0,0,.18)}
+.rank-stamp,.tag-stamp,.trank,.ebadge,.id-chip,.tsize{font-family:var(--pill-font)!important;border-radius:2px!important;text-transform:none!important;letter-spacing:.02em!important}.rank-stamp[class*="rank-"]::before{font-size:10px!important}.ebadge.flagchip{background:var(--flag-pill-bg)!important;color:var(--flag-pill-ink)!important;border-color:var(--flag-pill-border)!important}.rank-style-button,.rank-style-option,.schema-value-edit,.field-edit-actions button{border-radius:2px!important}

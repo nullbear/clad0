@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link id="shell-theme-css" rel="stylesheet" href="./shell-themes/parchment.css"><title>Choose clad0 Project</title>
+<style>
+  :root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#241c15;background:#f7f0e7}
+  body{margin:0;min-height:100vh;display:grid;place-items:center}
+  main{width:min(760px,calc(100vw - 40px));background:#fffaf2;border:1px solid #dac6ad;border-radius:18px;box-shadow:0 18px 50px #0002;padding:24px}
+  h1{margin:0 0 8px;font-size:28px}.muted{color:#705f4c;margin:0 0 20px;line-height:1.45}
+  #projects{display:grid;gap:10px;margin:18px 0}.project{border:1px solid #dfccb5;border-radius:12px;padding:14px;background:#fff;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}.project strong{display:block}.project code{display:block;color:#766859;font-size:12px;word-break:break-all;margin-top:4px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}button{border:1px solid #a98a63;background:#5e3c1f;color:white;border-radius:10px;padding:10px 14px;font-weight:650;cursor:pointer}button.secondary{background:#fff;color:#4a321e}button:disabled{opacity:.55;cursor:default}.empty{border:1px dashed #c9b08f;border-radius:12px;padding:18px;color:#735f47;background:#fffdf8}.error{color:#8b1f1f;margin-top:12px;white-space:pre-wrap}.small{font-size:12px;color:#806f5e}
+</style>
+</head>
+<body>
+<main>
+  <h1>Choose a clad0 project</h1>
+  <p class="muted">A project is an external <code>/data</code> folder. The app and server are packaged in the executable; your journal data stays outside the install so you can back it up, move it, or switch between projects.</p>
+  <div id="projects" class="empty">Loading projects…</div>
+  <div class="actions">
+    <button id="create">Create empty project…</button>
+    <button id="add" class="secondary">Use existing /data folder…</button>
+  </div>
+  <div class="small">Minimum files are created automatically: <code>clado.json</code>, <code>prose/</code>, <code>stats/</code>, and <code>media/</code>.</div>
+  <div id="error" class="error"></div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const projectsEl = $('#projects');
+const errorEl = $('#error');
+function setError(e){ errorEl.textContent = e ? String(e.message || e) : ''; }
+async function refresh(){
+  setError('');
+  const state = await window.clad0Projects.list();
+  const projects = state.projects || [];
+  if (!projects.length) {
+    projectsEl.className = 'empty';
+    projectsEl.textContent = 'No projects have been registered yet. Create an empty project or choose an existing /data folder.';
+    return;
+  }
+  projectsEl.className = '';
+  projectsEl.innerHTML = '';
+  for (const p of projects) {
+    const row = document.createElement('div'); row.className = 'project';
+    const info = document.createElement('div');
+    info.innerHTML = `<strong>${escapeHtml(p.name)}${p.id===state.activeProjectId?' · active':''}</strong><code>${escapeHtml(p.dataDir)}</code>`;
+    const btns = document.createElement('div');
+    const open = document.createElement('button'); open.textContent = 'Open'; open.onclick = async()=>{ try{ await window.clad0Projects.select(p.id); } catch(e){ setError(e); } };
+    const reveal = document.createElement('button'); reveal.textContent = 'Open Project Folder'; reveal.className='secondary'; reveal.onclick = async()=>{ try{ await window.clad0Projects.reveal(p.id); } catch(e){ setError(e); } };
+    btns.append(open, reveal); row.append(info, btns); projectsEl.append(row);
+  }
+}
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+$('#create').onclick = async()=>{ try{ await window.clad0Projects.create(); await refresh(); } catch(e){ setError(e); } };
+$('#add').onclick = async()=>{ try{ await window.clad0Projects.addExisting(); await refresh(); } catch(e){ setError(e); } };
+refresh().catch(setError);
+</script>
+</body>
+</html>
